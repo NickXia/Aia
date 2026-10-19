@@ -1,0 +1,7 @@
+{
+  "float": [
+    { "name": "page_text_size", "value": "14fp" },
+    { "name": "title_text_size", "value": "17fp" },
+    { "name": "toolbar_height", "value": "52vp" }
+  ]
+}

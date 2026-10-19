@@ -1,0 +1,16 @@
+{
+  "string": [
+    {
+      "name": "module_desc",
+      "value": "Aia 浏览器主模块"
+    },
+    {
+      "name": "EntryAbility_desc",
+      "value": "Aia 浏览器"
+    },
+    {
+      "name": "EntryAbility_label",
+      "value": "Aia"
+    }
+  ]
+}

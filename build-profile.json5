@@ -1,0 +1,56 @@
+{
+  "app": {
+    "products": [
+      {
+        "name": "default",
+        "signingConfig": "default",
+        "targetSdkVersion": "26.0.0",
+        "compatibleSdkVersion": "26.0.0",
+        "runtimeOS": "HarmonyOS",
+        "buildOption": {
+          "strictMode": {
+            "caseSensitiveCheck": true,
+            "useNormalizedOHMUrl": true
+          }
+        }
+      }
+    ],
+    "buildModeSet": [
+      {
+        "name": "debug"
+      },
+      {
+        "name": "release"
+      }
+    ],
+    "signingConfigs": [
+      {
+        "name": "default",
+        "type": "HarmonyOS",
+        "material": {
+          "certpath": "C:\\Users\\Xzz18\\.ohos\\config\\default_Aia_OK-oYf9k2b1ObQqy2iyt_6aQB0kEKudTq4yr94all9U=.cer",
+          "keyAlias": "debugKey",
+          "keyPassword": "0000001960E773A9F08A9E6F460F1AA1D9D40D3D38B08274C541B171B169F9EA9BA1F3EB032E80EDF6",
+          "profile": "C:\\Users\\Xzz18\\.ohos\\config\\default_Aia_OK-oYf9k2b1ObQqy2iyt_6aQB0kEKudTq4yr94all9U=.p7b",
+          "signAlg": "SHA256withECDSA",
+          "storeFile": "C:\\Users\\Xzz18\\.ohos\\config\\default_Aia_OK-oYf9k2b1ObQqy2iyt_6aQB0kEKudTq4yr94all9U=.p12",
+          "storePassword": "00000019B53A278F321619574224700A795709DD65AF2B0E698AA1BF3C4021BDBC73F79F8E0826172B"
+        }
+      }
+    ]
+  },
+  "modules": [
+    {
+      "name": "entry",
+      "srcPath": "./entry",
+      "targets": [
+        {
+          "name": "default",
+          "applyToProducts": [
+            "default"
+          ]
+        }
+      ]
+    }
+  ]
+}

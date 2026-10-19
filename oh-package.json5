@@ -1,0 +1,11 @@
+{
+  "modelVersion": "6.0.0",
+  "name": "aia",
+  "version": "1.0.0",
+  "description": "Aia - a quiet, fast browser for HarmonyOS",
+  "main": "",
+  "author": "Aia",
+  "license": "MIT",
+  "dependencies": {},
+  "devDependencies": {}
+}
