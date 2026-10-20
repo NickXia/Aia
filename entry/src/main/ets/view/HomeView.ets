@@ -1,6 +1,7 @@
 import { HistoryEntry } from '../model/Models';
 import { colorForHost, hostOf, prettyUrl } from '../common/UrlUtils';
-import { ZFont, ZSpace } from '../common/AiaTheme';
+import { ZFont, ZSpace, getUiScale } from '../common/AiaTheme';
+import { C } from '../common/AiaTheme';
 import { hilog } from '@kit.PerformanceAnalysisKit';
 
 /** 快捷入口数据直接内联在本文件，避免跨模块初始化时序问题 */
@@ -51,19 +52,19 @@ export struct HomeView {
     Column({ space: 8 }) {
       Stack() {
         Text(item.name.substring(0, 1))
-          .fontSize(19)
+          .fontSize(Math.round(19 * getUiScale()))
           .fontWeight(FontWeight.Medium)
           .fontFamily('serif')
           .fontColor(item.color)
       }
-      .width(52)
-      .height(52)
-      .borderRadius(26)
-      .backgroundColor($r('app.color.surface_alt'))
+      .width(Math.round(52 * getUiScale()))
+      .height(Math.round(52 * getUiScale()))
+      .borderRadius(Math.round(26 * getUiScale()))
+      .backgroundColor(C('surface_alt'))
 
       Text(item.name)
         .fontSize(ZFont.caption)
-        .fontColor($r('app.color.text_secondary'))
+        .fontColor(C('text_secondary'))
         .maxLines(1)
         .textOverflow({ overflow: TextOverflow.Ellipsis })
     }
@@ -77,26 +78,26 @@ export struct HomeView {
     Row({ space: 11 }) {
       Stack() {
         Text(hostOf(item.url).substring(0, 1).toUpperCase())
-          .fontSize(12)
+          .fontSize(Math.round(12 * getUiScale()))
           .fontWeight(FontWeight.Medium)
           .fontColor(colorForHost(hostOf(item.url)))
       }
       .width(28)
       .height(28)
       .borderRadius(9)
-      .backgroundColor($r('app.color.surface_alt'))
+      .backgroundColor(C('surface_alt'))
 
       Column({ space: 2 }) {
         Text(item.title.length > 0 ? item.title : prettyUrl(item.url))
           .fontSize(ZFont.footnote)
-          .fontColor($r('app.color.text_primary'))
+          .fontColor(C('text_primary'))
           .maxLines(1)
           .textOverflow({ overflow: TextOverflow.Ellipsis })
           .width('100%')
           .textAlign(TextAlign.Start)
         Text(hostOf(item.url))
-          .fontSize(10)
-          .fontColor($r('app.color.text_tertiary'))
+          .fontSize(Math.round(10 * getUiScale()))
+          .fontColor(C('text_tertiary'))
           .maxLines(1)
           .width('100%')
           .textAlign(TextAlign.Start)
@@ -122,27 +123,27 @@ export struct HomeView {
           Column() {
             Row({ space: 10 }) {
               Text('Aia')
-                .fontSize(32)
+                .fontSize(Math.round(32 * getUiScale()))
                 .fontWeight(FontWeight.Medium)
                 .fontFamily('serif')
-                .fontColor($r('app.color.text_primary'))
+                .fontColor(C('text_primary'))
                 .letterSpacing(8)
               Text('雅')
-                .fontSize(11)
+                .fontSize(Math.round(11 * getUiScale()))
                 .fontFamily('serif')
-                .fontColor($r('app.color.page_bg'))
+                .fontColor(C('page_bg'))
                 .width(20)
                 .height(20)
                 .textAlign(TextAlign.Center)
                 .borderRadius(3)
-                .backgroundColor($r('app.color.seal'))
+                .backgroundColor(C('seal'))
             }
             .alignItems(VerticalAlign.Center)
 
             Text('简单到只剩你需要的')
-              .fontSize(13)
+              .fontSize(Math.round(13 * getUiScale()))
               .fontFamily('serif')
-              .fontColor($r('app.color.text_secondary'))
+              .fontColor(C('text_secondary'))
               .letterSpacing(4)
               .margin({ top: 10 })
           }
@@ -166,7 +167,7 @@ export struct HomeView {
           Column() {
             Text('最近访问')
               .fontSize(ZFont.caption)
-              .fontColor($r('app.color.text_tertiary'))
+              .fontColor(C('text_tertiary'))
               .width('100%')
               .textAlign(TextAlign.Start)
               .margin({ top: 34, bottom: 4 })

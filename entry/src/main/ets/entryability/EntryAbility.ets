@@ -3,6 +3,7 @@ import { hilog } from '@kit.PerformanceAnalysisKit';
 import { window } from '@kit.ArkUI';
 import { BusinessError } from '@kit.BasicServicesKit';
 import { AiaStore } from '../common/Storage';
+import { ConfigurationConstant, Configuration } from '@kit.AbilityKit';
 
 const TAG: string = 'Aia';
 const DOMAIN: number = 0x0001;
@@ -12,7 +13,22 @@ export default class EntryAbility extends UIAbility {
     AiaStore.init(this.context);
     const incoming: string = want.uri === undefined ? '' : want.uri;
     AppStorage.setOrCreate<string>('launchUrl', incoming);
+    // 深浅色初值（阅读/普通主题的 C() 取色依赖此状态）
+    try {
+      const cfg = this.context.config;
+      AppStorage.setOrCreate<boolean>('isDark',
+        cfg.colorMode === ConfigurationConstant.ColorMode.COLOR_MODE_DARK);
+    } catch (err) {
+      AppStorage.setOrCreate<boolean>('isDark', false);
+    }
+    AppStorage.setOrCreate<number>('themeEpoch', 0);
     hilog.info(DOMAIN, TAG, 'Aia started');
+  }
+
+  onConfigurationUpdate(newConfig: Configuration): void {
+    const dark: boolean = newConfig.colorMode === ConfigurationConstant.ColorMode.COLOR_MODE_DARK;
+    AppStorage.setOrCreate<boolean>('isDark', dark);
+    AppStorage.setOrCreate<number>('themeEpoch', (AppStorage.get<number>('themeEpoch') ?? 0) + 1);
   }
 
   onNewWant(want: Want, launchParam: AbilityConstant.LaunchParam): void {

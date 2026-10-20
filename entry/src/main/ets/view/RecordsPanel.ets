@@ -1,6 +1,7 @@
 import { HistoryEntry } from '../model/Models';
 import { colorForHost, hostOf, initialOf, prettyUrl } from '../common/UrlUtils';
-import { ZFont, ZRadius, ZSpace } from '../common/AiaTheme';
+import { ZFont, ZRadius, ZSpace, getUiScale } from '../common/AiaTheme';
+import { C } from '../common/AiaTheme';
 
 /**
  * 书签 / 历史 共用的列表面板（从底部升起的半屏）。
@@ -25,26 +26,26 @@ export struct RecordsPanel {
     Row({ space: 11 }) {
       Stack() {
         Text(initialOf(hostOf(item.url)))
-          .fontSize(12)
+          .fontSize(Math.round(12 * getUiScale()))
           .fontWeight(FontWeight.Medium)
           .fontColor(colorForHost(hostOf(item.url)))
       }
       .width(32)
       .height(32)
       .borderRadius(10)
-      .backgroundColor($r('app.color.surface_alt'))
+      .backgroundColor(C('surface_alt'))
 
       Column({ space: 2 }) {
         Text(item.title.length > 0 ? item.title : prettyUrl(item.url))
           .fontSize(ZFont.body)
-          .fontColor($r('app.color.text_primary'))
+          .fontColor(C('text_primary'))
           .maxLines(1)
           .textOverflow({ overflow: TextOverflow.Ellipsis })
           .width('100%')
           .textAlign(TextAlign.Start)
         Text(hostOf(item.url))
-          .fontSize(10)
-          .fontColor($r('app.color.text_tertiary'))
+          .fontSize(Math.round(10 * getUiScale()))
+          .fontColor(C('text_tertiary'))
           .maxLines(1)
           .width('100%')
           .textAlign(TextAlign.Start)
@@ -69,7 +70,7 @@ export struct RecordsPanel {
       Column()
         .width('100%')
         .height('100%')
-        .backgroundColor($r('app.color.scrim'))
+        .backgroundColor(C('scrim'))
         .onClick(() => this.onClose())
 
       Column() {
@@ -79,7 +80,7 @@ export struct RecordsPanel {
             .width(34)
             .height(4)
             .borderRadius(2)
-            .backgroundColor($r('app.color.surface_alt_2'))
+            .backgroundColor(C('surface_alt_2'))
         }
         .width('100%')
         .justifyContent(FlexAlign.Center)
@@ -89,21 +90,21 @@ export struct RecordsPanel {
           Text(this.title)
             .fontSize(ZFont.title)
             .fontWeight(FontWeight.Medium)
-            .fontColor($r('app.color.text_primary'))
+            .fontColor(C('text_primary'))
 
           Blank()
 
           if (this.items.length > 0) {
             Text(this.mode === 'history' ? '清空' : '删全部')
               .fontSize(ZFont.footnote)
-              .fontColor($r('app.color.danger'))
+              .fontColor(C('danger'))
               .padding({ left: 8, right: 8, top: 6, bottom: 6 })
               .onClick(() => this.onClearAll())
           }
 
           Text('完成')
             .fontSize(ZFont.body)
-            .fontColor($r('app.color.accent'))
+            .fontColor(C('accent'))
             .padding({ left: 10, right: 4, top: 6, bottom: 6 })
             .onClick(() => this.onClose())
         }
@@ -118,7 +119,7 @@ export struct RecordsPanel {
               .opacity(0.28)
             Text(this.mode === 'history' ? '还没有浏览记录' : '还没有书签')
               .fontSize(ZFont.footnote)
-              .fontColor($r('app.color.text_tertiary'))
+              .fontColor(C('text_tertiary'))
           }
           .width('100%')
           .layoutWeight(1)
@@ -142,7 +143,7 @@ export struct RecordsPanel {
       .height('74%')
       .padding({ bottom: 16 })
       .borderRadius({ topLeft: ZRadius.sheet, topRight: ZRadius.sheet })
-      .backgroundColor($r('app.color.surface'))
+      .backgroundColor(C('surface'))
       .transition(TransitionEffect.move(TransitionEdge.BOTTOM)
         .animation({ duration: 260, curve: Curve.FastOutSlowIn }))
     }

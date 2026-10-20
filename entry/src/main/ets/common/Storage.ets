@@ -12,6 +12,8 @@ const KEY_SAVE_HISTORY: string = 'save_history';
 const KEY_JAVASCRIPT: string = 'javascript';
 const KEY_DNT: string = 'do_not_track';
 const KEY_BG_IMAGE: string = 'bg_image';
+const KEY_ELDER: string = 'elder_mode';
+const KEY_READING: string = 'reading_theme';
 
 /**
  * 轻量本地存储。全部走 Preferences，读写都是同步的（数据量很小）。
@@ -177,6 +179,24 @@ export class AiaStore {
 
   static set bgImage(v: string) {
     AiaStore.put(KEY_BG_IMAGE, v);
+  }
+
+  /** 关怀模式（老年人模式）：更大的字体与触控目标 */
+  static get elderMode(): boolean {
+    return AiaStore.getBool(KEY_ELDER, false);
+  }
+
+  static set elderMode(v: boolean) {
+    AiaStore.put(KEY_ELDER, v);
+  }
+
+  /** 阅读模式（羊皮卷主题） */
+  static get readingTheme(): boolean {
+    return AiaStore.getBool(KEY_READING, false);
+  }
+
+  static set readingTheme(v: boolean) {
+    AiaStore.put(KEY_READING, v);
   }
 
   static clearHistory(): void {

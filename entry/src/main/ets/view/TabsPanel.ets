@@ -1,6 +1,7 @@
 import { TabInfo } from '../model/Models';
 import { colorForHost, hostOf, initialOf, prettyUrl } from '../common/UrlUtils';
-import { ZFont, ZRadius, ZSpace } from '../common/AiaTheme';
+import { ZFont, ZRadius, ZSpace, getUiScale } from '../common/AiaTheme';
+import { C } from '../common/AiaTheme';
 
 /**
  * 标签管理：整页覆盖。卡片用域名色做视觉区分，
@@ -27,18 +28,18 @@ export struct TabsPanel {
       Row({ space: 7 }) {
         Stack() {
           Text(tab.isHome ? 'Z' : initialOf(hostOf(tab.url)))
-            .fontSize(10)
+            .fontSize(Math.round(10 * getUiScale()))
             .fontWeight(FontWeight.Medium)
-            .fontColor(tab.isHome ? $r('app.color.text_secondary') : colorForHost(hostOf(tab.url)))
+            .fontColor(tab.isHome ? C('text_secondary') : colorForHost(hostOf(tab.url)))
         }
         .width(20)
         .height(20)
         .borderRadius(6)
-        .backgroundColor($r('app.color.surface_alt'))
+        .backgroundColor(C('surface_alt'))
 
         Text(tab.isHome ? '新标签页' : (tab.title.length > 0 ? tab.title : prettyUrl(tab.url)))
           .fontSize(ZFont.footnote)
-          .fontColor($r('app.color.text_primary'))
+          .fontColor(C('text_primary'))
           .maxLines(1)
           .textOverflow({ overflow: TextOverflow.Ellipsis })
           .layoutWeight(1)
@@ -57,23 +58,23 @@ export struct TabsPanel {
 
       Stack() {
         Text(tab.isHome ? 'Aia' : initialOf(hostOf(tab.url)))
-          .fontSize(40)
+          .fontSize(Math.round(40 * getUiScale()))
           .fontWeight(FontWeight.Bold)
-          .fontColor(tab.isHome ? $r('app.color.text_tertiary') : colorForHost(hostOf(tab.url)))
+          .fontColor(tab.isHome ? C('text_tertiary') : colorForHost(hostOf(tab.url)))
           .opacity(0.22)
       }
       .width('100%')
       .layoutWeight(1)
-      .backgroundColor($r('app.color.surface_alt'))
+      .backgroundColor(C('surface_alt'))
     }
     .width('100%')
     .height(158)
     .borderRadius(ZRadius.card)
     .clip(true)
-    .backgroundColor($r('app.color.surface'))
+    .backgroundColor(C('surface'))
     .border({
       width: tab.id === this.activeId ? 1.6 : 0.5,
-      color: tab.id === this.activeId ? $r('app.color.accent') : $r('app.color.divider')
+      color: tab.id === this.activeId ? C('accent') : C('divider')
     })
     .onClick(() => this.onSelect(tab.id))
   }
@@ -84,13 +85,13 @@ export struct TabsPanel {
         Text('标签页')
           .fontSize(ZFont.title)
           .fontWeight(FontWeight.Medium)
-          .fontColor($r('app.color.text_primary'))
+          .fontColor(C('text_primary'))
 
         Blank()
 
         Text('完成')
           .fontSize(ZFont.body)
-          .fontColor($r('app.color.accent'))
+          .fontColor(C('accent'))
           .padding({ left: 10, right: 10, top: 6, bottom: 6 })
           .onClick(() => this.onClose())
       }
@@ -114,20 +115,20 @@ export struct TabsPanel {
       Row({ space: 10 }) {
         Text('关闭全部')
           .fontSize(ZFont.footnote)
-          .fontColor($r('app.color.text_secondary'))
+          .fontColor(C('text_secondary'))
           .padding({ left: 16, right: 16, top: 11, bottom: 11 })
           .borderRadius(ZRadius.pill)
-          .backgroundColor($r('app.color.surface_alt'))
+          .backgroundColor(C('surface_alt'))
           .onClick(() => this.onCloseAll())
 
         Text('新建标签页')
           .fontSize(ZFont.footnote)
-          .fontColor($r('app.color.surface'))
+          .fontColor(C('surface'))
           .layoutWeight(1)
           .height(40)
           .textAlign(TextAlign.Center)
           .borderRadius(ZRadius.pill)
-          .backgroundColor($r('app.color.text_primary'))
+          .backgroundColor(C('text_primary'))
           .onClick(() => this.onCreate())
       }
       .width('100%')
@@ -135,7 +136,7 @@ export struct TabsPanel {
     }
     .width('100%')
     .height('100%')
-    .backgroundColor($r('app.color.page_bg'))
+    .backgroundColor(C('page_bg'))
     .transition(TransitionEffect.OPACITY.animation({ duration: 160 })
       .combine(TransitionEffect.scale({ x: 0.96, y: 0.96 }).animation({ duration: 200 })))
   }

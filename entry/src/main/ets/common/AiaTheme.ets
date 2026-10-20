@@ -2,36 +2,127 @@
  * Aia 设计变量
  * 颜色统一走 resources/base|dark/element/color.json，随系统深浅色自动切换。
  * 这里只放尺寸、圆角、字重等与主题无关的量。
+ *
+ * 关怀模式（老年人模式）：所有字号/图标/触控目标按 uiScale 整体放大，
+ * 通过 setUiScale() 切换；调用方负责在切换后重建 UI 树（Index.uiEpoch）。
  */
+let uiScale: number = 1;
+
+export function setUiScale(s: number): void {
+  uiScale = s <= 0 ? 1 : s;
+}
+
+export function getUiScale(): number {
+  return uiScale;
+}
+
+/** 按当前缩放因子取整数值（字号/图标/触控目标通用） */
+export function vs(base: number): number {
+  return Math.round(base * uiScale);
+}
+
 export class ZSpace {
-  static readonly xs: number = 4;
-  static readonly sm: number = 8;
-  static readonly md: number = 12;
-  static readonly lg: number = 16;
-  static readonly xl: number = 20;
-  static readonly xxl: number = 28;
-  static readonly page: number = 18;
+  static get xs(): number { return vs(4); }
+  static get sm(): number { return vs(8); }
+  static get md(): number { return vs(12); }
+  static get lg(): number { return vs(16); }
+  static get xl(): number { return vs(20); }
+  static get xxl(): number { return vs(28); }
+  static get page(): number { return vs(18); }
 }
 
 export class ZRadius {
-  static readonly pill: number = 100;
-  static readonly card: number = 16;
-  static readonly sheet: number = 24;
-  static readonly small: number = 10;
+  static get pill(): number { return 100; }
+  static get card(): number { return vs(16); }
+  static get sheet(): number { return vs(24); }
+  static get small(): number { return vs(10); }
 }
 
 export class ZFont {
-  static readonly caption: number = 11;
-  static readonly footnote: number = 12;
-  static readonly body: number = 14;
-  static readonly callout: number = 15;
-  static readonly title: number = 17;
-  static readonly display: number = 30;
+  static get caption(): number { return vs(11); }
+  static get footnote(): number { return vs(12); }
+  static get body(): number { return vs(14); }
+  static get callout(): number { return vs(15); }
+  static get title(): number { return vs(17); }
+  static get display(): number { return vs(30); }
 }
 
 export class ZSize {
-  static readonly toolbar: number = 52;
-  static readonly pill: number = 38;
-  static readonly iconButton: number = 38;
-  static readonly icon: number = 21;
+  static get toolbar(): number { return vs(52); }
+  static get pill(): number { return vs(38); }
+  static get iconButton(): number { return vs(38); }
+  static get icon(): number { return vs(21); }
+}
+
+/**
+ * 主题引擎：
+ * - 'system'    普通模式：跟随系统深浅色（色板与 color.json 一致）
+ * - 'parchment' 阅读模式：羊皮卷暖色，不受系统深浅色影响
+ * 视图统一用 C(role) 取色；主题切换后由调用方重建 UI 树（Index.uiEpoch）。
+ */
+export type ThemeMode = 'system' | 'parchment';
+
+let themeMode: ThemeMode = 'system';
+
+export function setThemeMode(m: ThemeMode): void {
+  themeMode = m;
+}
+
+export function getThemeMode(): ThemeMode {
+  return themeMode;
+}
+
+const SYS_LIGHT: Record<string, string> = {
+  'page_bg': '#F8F5EC',
+  'surface': '#F6F2E8',
+  'surface_alt': '#ECE6D6',
+  'surface_alt_2': '#E2DAC5',
+  'divider': '#DDD4BF',
+  'text_primary': '#211E18',
+  'text_secondary': '#57503F',
+  'text_tertiary': '#8A8270',
+  'accent': '#3E5C63',
+  'danger': '#A83F2E',
+  'seal': '#A83F2E',
+  'scrim': '#5C28241C'
+};
+
+const SYS_DARK: Record<string, string> = {
+  'page_bg': '#1C1C1A',
+  'surface': '#222220',
+  'surface_alt': '#2B2B28',
+  'surface_alt_2': '#343430',
+  'divider': '#38372F',
+  'text_primary': '#F2EEE2',
+  'text_secondary': '#C0B8A4',
+  'text_tertiary': '#928C7A',
+  'accent': '#93B1A5',
+  'danger': '#C05A48',
+  'seal': '#B0503C',
+  'scrim': '#A0000000'
+};
+
+/** 羊皮卷阅读主题：暖纸底 + 深棕墨字 + 皮革棕强调，昼夜通用 */
+const PARCHMENT: Record<string, string> = {
+  'page_bg': '#F0E6CE',
+  'surface': '#F6EDD8',
+  'surface_alt': '#E9DCBB',
+  'surface_alt_2': '#DFCFA6',
+  'divider': '#D8C69C',
+  'text_primary': '#3F2F1D',
+  'text_secondary': '#66513A',
+  'text_tertiary': '#8C7752',
+  'accent': '#8C5A2B',
+  'danger': '#A8432E',
+  'seal': '#8C4A2F',
+  'scrim': '#5C3A241C'
+};
+
+/** 语义色取值入口：所有视图经此取色，替代 $r('app.color.*') */
+export function C(role: string): ResourceColor {
+  if (themeMode === 'parchment') {
+    return PARCHMENT[role] ?? '#F0E6CE';
+  }
+  const dark: boolean = AppStorage.get<boolean>('isDark') === true;
+  return dark ? (SYS_DARK[role] ?? '#1C1C1A') : (SYS_LIGHT[role] ?? '#F8F5EC');
 }

@@ -1,4 +1,5 @@
 import { ZFont, ZRadius } from '../common/AiaTheme';
+import { C } from '../common/AiaTheme';
 
 class MenuEntry {
   key: string;
@@ -43,7 +44,7 @@ export struct MenuSheet {
       Column()
         .width('100%')
         .height('100%')
-        .backgroundColor($r('app.color.scrim'))
+        .backgroundColor(C('scrim'))
         .onClick(() => this.onClose())
 
       Column({ space: 4 }) {
@@ -52,7 +53,7 @@ export struct MenuSheet {
             .width(34)
             .height(4)
             .borderRadius(2)
-            .backgroundColor($r('app.color.surface_alt_2'))
+            .backgroundColor(C('surface_alt_2'))
         }
         .width('100%')
         .justifyContent(FlexAlign.Center)
@@ -69,11 +70,11 @@ export struct MenuSheet {
               .width(46)
               .height(46)
               .borderRadius(14)
-              .backgroundColor($r('app.color.surface_alt'))
+              .backgroundColor(C('surface_alt'))
 
               Text(item.label)
                 .fontSize(ZFont.caption)
-                .fontColor($r('app.color.text_secondary'))
+                .fontColor(C('text_secondary'))
             }
             .width('25%')
             .padding({ top: 6, bottom: 14 })
@@ -87,7 +88,7 @@ export struct MenuSheet {
       .width('100%')
       .padding({ left: 10, right: 10, bottom: 22 })
       .borderRadius({ topLeft: ZRadius.sheet, topRight: ZRadius.sheet })
-      .backgroundColor($r('app.color.surface'))
+      .backgroundColor(C('surface'))
       .transition(TransitionEffect.move(TransitionEdge.BOTTOM)
         .animation({ duration: 240, curve: Curve.FastOutSlowIn }))
     }

@@ -14,6 +14,10 @@ export class BrowserTab {
   progress: number = 0;
   canGoBack: boolean = false;
   canGoForward: boolean = false;
+  /** 最近一次导航发起的时间戳 */
+  lastNavTime: number = 0;
+  /** 返回键按下后置位：下一个 about:blank pageEnd 代表「退到占位页」，应回主页 */
+  expectBlankHome: boolean = false;
   controller: webview.WebviewController | null = null;
 
   constructor(id: string) {
@@ -77,4 +81,11 @@ export interface RecordJson {
   title: string;
   url: string;
   time: number;
+}
+
+/** 主页快捷方式 */
+export interface DialItem {
+  name: string;
+  url: string;
+  color: string;
 }

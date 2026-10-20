@@ -1,11 +1,13 @@
 import { promptAction } from '@kit.ArkUI';
 import { pasteboard } from '@kit.BasicServicesKit';
 import { photoAccessHelper } from '@kit.MediaLibraryKit';
-import { fileIo } from '@kit.CoreFileKit';
+import { fileIo, fileUri } from '@kit.CoreFileKit';
 import { BrowserTab, Bookmark, HistoryEntry, TabInfo } from '../model/Models';
 import { ENGINES, SearchEngine } from '../common/SearchEngine';
 import { hostOf, resolveInput, isSecure } from '../common/UrlUtils';
 import { AiaStore } from '../common/Storage';
+import { setUiScale, getUiScale, setThemeMode, getThemeMode } from '../common/AiaTheme';
+import { C } from '../common/AiaTheme';
 import { WebPane } from '../view/WebPane';
 import { HomeView } from '../view/HomeView';
 import { AddressBar } from '../view/AddressBar';
@@ -35,12 +37,21 @@ struct Index {
   @State bgImage: string = '';
   @State topAvoid: number = 0;
   @State bottomAvoid: number = 0;
+  /** 活动标签的加载进度（0-100），由 WebPane 通过 AppStorage 实时同步 */
+  @StorageLink('loadingPct') loadingPct: number = 100;
 
   @State menuVisible: boolean = false;
   @State tabsVisible: boolean = false;
   @State recordsVisible: boolean = false;
   @State settingsVisible: boolean = false;
   @State recordsMode: string = 'bookmark';
+  @State elderMode: boolean = false;
+  /** 递增以整树重建 UI（关怀模式切换字号后必须重建才能生效） */
+  @State uiEpoch: number = 0;
+  /** 阅读模式（羊皮卷主题） */
+  @State readingTheme: boolean = false;
+  /** 系统深浅色变化时递增（EntryAbility 写入），驱动整树重建取新色 */
+  @StorageLink('themeEpoch') themeEpoch: number = 0;
 
   private seq: number = 0;
 
@@ -53,6 +64,16 @@ struct Index {
     this.jsEnabled = AiaStore.javaScriptEnabled;
     this.dnt = AiaStore.doNotTrack;
     this.bgImage = AiaStore.bgImage;
+    // 关怀模式：先设缩放因子再建 UI，首帧即是大字版
+    this.elderMode = AiaStore.elderMode;
+    if (this.elderMode) {
+      setUiScale(1.25);
+    }
+    // 阅读模式（羊皮卷主题）
+    this.readingTheme = AiaStore.readingTheme;
+    if (this.readingTheme) {
+      setThemeMode('parchment');
+    }
     // 全屏布局下按系统避让高度留白（px -> vp）
     const topPx: number = AppStorage.get<number>('topAvoidPx') ?? 0;
     const bottomPx: number = AppStorage.get<number>('bottomAvoidPx') ?? 0;
@@ -107,6 +128,7 @@ struct Index {
       try {
         // 实时查询，避免状态滞后导致系统返回失效
         if (tab.controller.accessBackward()) {
+          tab.expectBlankHome = true; // 与底栏返回键行为一致
           tab.controller.backward();
           return true;
         }
@@ -216,6 +238,7 @@ struct Index {
   // -------------------------------------------------------------- 页面导航
   private navigate(input: string): void {
     const target: string = resolveInput(input, ENGINES[this.engineIndex]);
+    console.info('AiaNav navigate input=' + input + ' target=' + target);
     if (target.length === 0) {
       return;
     }
@@ -225,8 +248,20 @@ struct Index {
     tab.title = hostOf(target);
     tab.canGoBack = false;
     tab.canGoForward = false;
+    tab.lastNavTime = Date.now();
+    tab.expectBlankHome = false;
+    tab.progress = 0;
+    tab.isLoading = true;
+    AppStorage.setOrCreate<number>('loadingPct', 0);
     if (tab.controller !== null) {
-      tab.controller.loadUrl(target);
+      try {
+        tab.controller.loadUrl(target);
+        console.info('AiaNav loadUrl ok');
+      } catch (err) {
+        console.error('AiaNav loadUrl FAILED: ' + JSON.stringify(err));
+      }
+    } else {
+      console.error('AiaNav controller is null');
     }
   }
 
@@ -259,6 +294,10 @@ struct Index {
   }
 
   private goBack(): void {
+    // 主页态按返回无意义，还会白白清掉前进栈
+    if (this.showHome) {
+      return;
+    }
     const tab: BrowserTab = this.activeTab();
     if (tab.controller === null) {
       return;
@@ -266,6 +305,8 @@ struct Index {
     try {
       // 点击时实时查询内核，不依赖可能滞后的状态标记
       if (tab.controller.accessBackward()) {
+        const target: string = tab.controller.getUrl();
+        tab.expectBlankHome = true; // 下一个占位页结束事件 = 主动返回，回主页
         tab.controller.backward();
       } else {
         this.goHome();
@@ -427,6 +468,18 @@ struct Index {
     return 'img';
   }
 
+  /** 沙箱路径 -> 应用内 file:// URI（Image 组件显示沙箱图片的标准方式） */
+  private bgUri(): string {
+    if (this.bgImage.length === 0) {
+      return '';
+    }
+    try {
+      return fileUri.getUriFromPath(this.bgImage);
+    } catch (err) {
+      return 'file://' + this.bgImage;
+    }
+  }
+
   private async pickBackground(): Promise<void> {
     try {
       const options: photoAccessHelper.PhotoSelectOptions = new photoAccessHelper.PhotoSelectOptions();
@@ -448,7 +501,14 @@ struct Index {
           return;
         }
         const dst: string = getContext(this).filesDir + '/home_bg.' + this.extOf(src);
-        fileIo.copyFile(srcFile.fd, dst);
+        // 必须用同步拷贝：异步版本未 await 会拷出 0 字节文件
+        fileIo.copyFileSync(srcFile.fd, dst);
+        const st: fileIo.Stat = fileIo.statSync(dst);
+        console.info('AiaBg copied to ' + dst + ' size=' + st.size);
+        if (st.size <= 0) {
+          promptAction.showToast({ message: '图片拷贝失败，请重试' });
+          return;
+        }
         this.bgImage = dst;
         AiaStore.bgImage = dst;
         promptAction.showToast({ message: '背景已更新' });
@@ -504,17 +564,15 @@ struct Index {
   }
 
   private handlePageStart(tab: BrowserTab): void {
-    // about:blank 占位页的加载事件不代表真实导航，忽略它，
-    // 否则主页会在启动瞬间被误切到空白网页层（闪一下就消失）
-    if (tab.url.length === 0) {
-      return;
-    }
+    // WebPane 已过滤 about:blank 占位页，能走到这里的一定是真实页面：
+    // 前进键恢复的页面也要把主页切走，否则网页和主页会叠在一起
     if (tab.id === this.activeId) {
       this.showHome = false;
     }
   }
 
   private handlePageFinished(tab: BrowserTab): void {
+    console.info('AiaNav pageFinished url=' + tab.url + ' active=' + (tab.id === this.activeId));
     // 网页历史的第一条是 about:blank 占位页，返回键退到这里时
     // 直接回主页，而不是停在一页空白
     if (tab.id === this.activeId && tab.url.length === 0) {
@@ -526,9 +584,11 @@ struct Index {
   // ------------------------------------------------------------------ UI
   build() {
     Stack({ alignContent: Alignment.Bottom }) {
+      // uiEpoch 变化 → 键变化 → 整树按新缩放因子重建（关怀模式切换）
+      ForEach([this.uiEpoch], (_: number) => {
       // 自定义背景铺满全屏（延伸到状态栏/手势条底下）
       if (this.bgImage.length > 0) {
-        Image('file://' + this.bgImage)
+        Image(this.bgUri())
           .width('100%')
           .height('100%')
           .objectFit(ImageFit.Cover)
@@ -538,16 +598,13 @@ struct Index {
         Column()
           .width('100%')
           .height('100%')
-          .backgroundColor($r('app.color.page_bg'))
+          .backgroundColor(C('page_bg'))
           .opacity(0.72)
       }
 
       Column() {
         AddressBar({
-          url: this.activeTab().url,
-          progress: this.activeTab().progress,
-          loading: this.activeTab().isLoading,
-          secure: isSecure(this.activeTab().url),
+          tab: this.activeTab(),
           home: this.showHome,
           onSubmit: (text: string) => this.navigate(text)
         })
@@ -557,10 +614,10 @@ struct Index {
             WebPane({
               tab: tab,
               active: tab.id === this.activeId,
-              hidden: this.showHome,
               blockImages: this.blockImages,
               jsEnabled: this.jsEnabled,
               doNotTrack: this.dnt,
+              readingTheme: this.readingTheme,
               onPageStart: (t: BrowserTab) => this.handlePageStart(t),
               onPageFinished: (t: BrowserTab) => this.handlePageFinished(t)
             })
@@ -576,11 +633,10 @@ struct Index {
         .width('100%')
         .layoutWeight(1)
         .clip(true)
-        .backgroundColor(this.bgImage.length > 0 ? Color.Transparent : $r('app.color.page_bg'))
+        .backgroundColor(Color.Transparent)
 
         BottomBar({
-          canBack: !this.showHome && this.activeTab().canGoBack,
-          canForward: !this.showHome && this.activeTab().canGoForward,
+          tab: this.activeTab(),
           home: this.showHome,
           tabCount: this.tabs.length,
           onAction: (action: string) => this.handleAction(action)
@@ -631,6 +687,22 @@ struct Index {
         })
       }
 
+      // 加载指示放根 Stack（与菜单同层），确保盖在网页原生表面之上
+      if (!this.showHome && this.loadingPct < 90) {
+        Column({ space: 10 }) {
+          LoadingProgress()
+            .width(38)
+            .height(38)
+            .color(C('accent'))
+          Text('正在加载 ' + this.loadingPct + '%')
+            .fontSize(Math.round(12 * getUiScale()))
+            .fontColor(C('text_secondary'))
+        }
+        .width('100%')
+        .height('100%')
+        .justifyContent(FlexAlign.Center)
+      }
+
       if (this.settingsVisible) {
         SettingsPanel({
           engineName: ENGINES[this.engineIndex].name,
@@ -640,6 +712,8 @@ struct Index {
           jsEnabled: this.jsEnabled,
           dnt: this.dnt,
           bgPath: this.bgImage,
+          elderMode: this.elderMode,
+          readingTheme: this.readingTheme,
           onToggle: (key: string, value: boolean) => {
             if (key === 'blockImages') {
               this.blockImages = value;
@@ -653,6 +727,20 @@ struct Index {
             } else if (key === 'dnt') {
               this.dnt = value;
               AiaStore.doNotTrack = value;
+            } else if (key === 'elderMode') {
+              // 关怀模式：切换缩放因子并整树重建 UI
+              this.elderMode = value;
+              AiaStore.elderMode = value;
+              setUiScale(value ? 1.25 : 1.0);
+              this.uiEpoch = this.uiEpoch + 1;
+              promptAction.showToast({ message: value ? '已开启关怀模式' : '已返回标准模式' });
+            } else if (key === 'readingTheme') {
+              // 阅读模式（羊皮卷主题）：切主题并整树重建
+              this.readingTheme = value;
+              AiaStore.readingTheme = value;
+              setThemeMode(value ? 'parchment' : 'system');
+              this.uiEpoch = this.uiEpoch + 1;
+              promptAction.showToast({ message: value ? '已进入阅读模式' : '已跟随系统配色' });
             }
           },
           onPickEngine: (index: number) => {
@@ -675,9 +763,10 @@ struct Index {
           }
         })
       }
+    }, (e: number) => 'epoch' + e.toString() + 't' + this.themeEpoch.toString() + (this.readingTheme ? 'r' : 's'))
     }
     .width('100%')
     .height('100%')
-    .backgroundColor($r('app.color.page_bg'))
+    .backgroundColor(C('page_bg'))
   }
 }
