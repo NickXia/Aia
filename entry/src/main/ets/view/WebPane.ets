@@ -93,6 +93,9 @@ export struct WebPane {
         this.tab.url = current;
         this.tab.isLoading = true;
         this.tab.progress = 0;
+        if (this.active) {
+          AppStorage.setOrCreate<boolean>('loadFailed', false);
+        }
         // 在加载开始时就刷新导航状态，不等 onPageEnd——
         // 否则慢页面加载期间返回键会一直处于滞后状态
         try {
@@ -154,6 +157,9 @@ export struct WebPane {
         }
         this.syncLoading();
         this.applyReadingFilter();
+        if (this.active) {
+          AppStorage.setOrCreate<boolean>('loadFailed', false);
+        }
         this.onPageFinished(this.tab);
       })
       // 报错页（登录墙、断网等）不会触发 onPageEnd，必须在这里结束加载状态，
@@ -162,6 +168,9 @@ export struct WebPane {
         this.tab.isLoading = false;
         this.tab.progress = 100;
         this.syncLoading();
+        if (this.active) {
+          AppStorage.setOrCreate<boolean>('loadFailed', true);
+        }
       })
       .visibility(this.active ? Visibility.Visible : Visibility.None);
     }

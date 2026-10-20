@@ -1,6 +1,22 @@
 import { preferences } from '@kit.ArkData';
 import { common } from '@kit.AbilityKit';
-import { Bookmark, HistoryEntry, RecordJson } from '../model/Models';
+import { Bookmark, HistoryEntry, RecordJson, DialItem } from '../model/Models';
+
+const KEY_DIALS: string = 'dials';
+
+const DEFAULT_DIALS: DialItem[] = [
+  { name: '百度', url: 'https://www.baidu.com', color: '#3F7BFF' },
+  { name: '知乎', url: 'https://www.zhihu.com', color: '#1B7CF2' },
+  { name: 'B站', url: 'https://m.bilibili.com', color: '#FB7299' },
+  { name: '微博', url: 'https://m.weibo.cn', color: '#E6412E' },
+  { name: '淘宝', url: 'https://www.taobao.com', color: '#FF6A00' },
+  { name: '抖音', url: 'https://www.douyin.com', color: '#1C1C24' },
+  { name: '七猫小说', url: 'https://www.qimao.com', color: '#E85445' },
+  { name: '少数派', url: 'https://sspai.com', color: '#D5413F' }
+];
+
+/** 第一版默认集：检测到它即视为未自定义，迁移到新默认集 */
+const LEGACY_DEFAULT_MARK: string = 'https://www.douban.com';
 
 const STORE_NAME: string = 'aia_store';
 const KEY_BOOKMARKS: string = 'bookmarks';
@@ -188,6 +204,41 @@ export class AiaStore {
 
   static set elderMode(v: boolean) {
     AiaStore.put(KEY_ELDER, v);
+  }
+
+  /** 主页快捷方式（可编辑） */
+  static loadDials(): DialItem[] {
+    const raw: string = AiaStore.getString(KEY_DIALS, JSON.stringify(DEFAULT_DIALS));
+    try {
+      const arr: object[] = JSON.parse(raw) as object[];
+      const result: DialItem[] = [];
+      let hasLegacyMark: boolean = false;
+      for (let i = 0; i < arr.length; i++) {
+        const o = arr[i] as Record<string, string>;
+        if (typeof o['name'] === 'string' && typeof o['url'] === 'string') {
+          if (o['url'] === LEGACY_DEFAULT_MARK) {
+            hasLegacyMark = true; // 旧默认集（含豆瓣），整体迁移
+          }
+          const d: DialItem = { name: o['name'], url: o['url'], color: o['color'] ?? '#3E5C63' };
+          result.push(d);
+        }
+      }
+      if (result.length === 0) {
+        return DEFAULT_DIALS;
+      }
+      if (hasLegacyMark) {
+        // 用户未自定义过：静默迁移到新默认集（去豆瓣/GitHub，加抖音/七猫）
+        AiaStore.saveDials(DEFAULT_DIALS);
+        return DEFAULT_DIALS;
+      }
+      return result;
+    } catch (err) {
+      return DEFAULT_DIALS;
+    }
+  }
+
+  static saveDials(list: DialItem[]): void {
+    AiaStore.put(KEY_DIALS, JSON.stringify(list));
   }
 
   /** 阅读模式（羊皮卷主题） */

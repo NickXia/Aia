@@ -2,9 +2,9 @@ import { promptAction } from '@kit.ArkUI';
 import { pasteboard } from '@kit.BasicServicesKit';
 import { photoAccessHelper } from '@kit.MediaLibraryKit';
 import { fileIo, fileUri } from '@kit.CoreFileKit';
-import { BrowserTab, Bookmark, HistoryEntry, TabInfo } from '../model/Models';
+import { BrowserTab, Bookmark, HistoryEntry, TabInfo, DialItem } from '../model/Models';
 import { ENGINES, SearchEngine } from '../common/SearchEngine';
-import { hostOf, resolveInput, isSecure } from '../common/UrlUtils';
+import { hostOf, resolveInput, isSecure, colorForHost } from '../common/UrlUtils';
 import { AiaStore } from '../common/Storage';
 import { setUiScale, getUiScale, setThemeMode, getThemeMode } from '../common/AiaTheme';
 import { C } from '../common/AiaTheme';
@@ -14,6 +14,7 @@ import { AddressBar } from '../view/AddressBar';
 import { BottomBar } from '../view/BottomBar';
 import { MenuSheet } from '../view/MenuSheet';
 import { TabsPanel } from '../view/TabsPanel';
+import { DialEditSheet } from '../view/DialEditSheet';
 import { RecordsPanel } from '../view/RecordsPanel';
 import { SettingsPanel } from '../view/SettingsPanel';
 
@@ -46,12 +47,17 @@ struct Index {
   @State settingsVisible: boolean = false;
   @State recordsMode: string = 'bookmark';
   @State elderMode: boolean = false;
+  @State dials: DialItem[] = [];
+  @State dialEditorVisible: boolean = false;
+  @State dialEditing: DialItem | null = null;
   /** 递增以整树重建 UI（关怀模式切换字号后必须重建才能生效） */
   @State uiEpoch: number = 0;
   /** 阅读模式（羊皮卷主题） */
   @State readingTheme: boolean = false;
   /** 系统深浅色变化时递增（EntryAbility 写入），驱动整树重建取新色 */
   @StorageLink('themeEpoch') themeEpoch: number = 0;
+  /** 活动标签网页加载失败（WebPane 写入），显示错误出路 */
+  @StorageLink('loadFailed') loadFailed: boolean = false;
 
   private seq: number = 0;
 
@@ -64,6 +70,7 @@ struct Index {
     this.jsEnabled = AiaStore.javaScriptEnabled;
     this.dnt = AiaStore.doNotTrack;
     this.bgImage = AiaStore.bgImage;
+    this.dials = AiaStore.loadDials();
     // 关怀模式：先设缩放因子再建 UI，首帧即是大字版
     this.elderMode = AiaStore.elderMode;
     if (this.elderMode) {
@@ -107,6 +114,10 @@ struct Index {
   }
 
   onBackPress(): boolean {
+    if (this.dialEditorVisible) {
+      this.dialEditorVisible = false;
+      return true;
+    }
     if (this.menuVisible) {
       this.menuVisible = false;
       return true;
@@ -308,6 +319,20 @@ struct Index {
         const target: string = tab.controller.getUrl();
         tab.expectBlankHome = true; // 下一个占位页结束事件 = 主动返回，回主页
         tab.controller.backward();
+        // 竞态兜底：极速返回时页面可能停在占位页且不再派发结束事件，
+        // 900ms 后仍在空白则直接回主页
+        setTimeout(() => {
+          try {
+            if (!this.showHome && tab.id === this.activeId && tab.controller !== null) {
+              const u: string = tab.controller.getUrl();
+              if (u === 'about:blank' || u.length === 0) {
+                this.goHome();
+              }
+            }
+          } catch (err) {
+            // ignore
+          }
+        }, 900);
       } else {
         this.goHome();
       }
@@ -525,6 +550,64 @@ struct Index {
     AiaStore.bgImage = '';
   }
 
+  // ------------------------------------------------------ 快捷方式编辑
+  private saveDial(name: string, url: string): void {
+    if (name.length === 0 || url.length === 0) {
+      promptAction.showToast({ message: '名称和网址都不能为空' });
+      return;
+    }
+    let target: string = url;
+    if (!/^https?:\/\//.test(target)) {
+      target = 'https://' + target;
+    }
+    const color: string = colorForHost(hostOf(target));
+    const d: DialItem = { name: name, url: target, color: color };
+    const list: DialItem[] = this.dials;
+    if (this.dialEditing !== null) {
+      for (let i = 0; i < list.length; i++) {
+        if (list[i].url === this.dialEditing.url) {
+          list[i] = d;
+          break;
+        }
+      }
+    } else {
+      list.push(d);
+    }
+    this.dials = list;
+    AiaStore.saveDials(list);
+    this.dialEditorVisible = false;
+    promptAction.showToast({ message: '已保存' });
+  }
+
+  private deleteDial(): void {
+    if (this.dialEditing === null) {
+      return;
+    }
+    const list: DialItem[] = [];
+    for (let i = 0; i < this.dials.length; i++) {
+      if (this.dials[i].url !== this.dialEditing.url) {
+        list.push(this.dials[i]);
+      }
+    }
+    this.dials = list;
+    AiaStore.saveDials(list);
+    this.dialEditorVisible = false;
+    promptAction.showToast({ message: '已删除' });
+  }
+
+  /** 网页加载失败后的重试 */
+  private retryActive(): void {
+    AppStorage.setOrCreate<boolean>('loadFailed', false);
+    const tab: BrowserTab = this.activeTab();
+    if (tab.controller !== null) {
+      try {
+        tab.controller.refresh();
+      } catch (err) {
+        // ignore
+      }
+    }
+  }
+
   // ------------------------------------------------------------------ 菜单
   private handleMenu(key: string): void {
     this.menuVisible = false;
@@ -626,7 +709,12 @@ struct Index {
           if (this.showHome) {
             HomeView({
               recents: this.history.slice(0, 4),
-              onOpen: (url: string) => this.navigate(url)
+              dials: this.dials,
+              onOpen: (url: string) => this.navigate(url),
+              onEditDial: (item: DialItem | null) => {
+                this.dialEditing = item;
+                this.dialEditorVisible = true;
+              }
             })
           }
         }
@@ -701,6 +789,53 @@ struct Index {
         .width('100%')
         .height('100%')
         .justifyContent(FlexAlign.Center)
+      }
+
+      // 加载失败：给出明确出路（重试 / 返回主页），不留白屏。
+      // 注意：卡片会拦截全屏点击（含底栏），必须自带「返回主页」出口
+      if (!this.showHome && this.loadFailed) {
+        Column({ space: 14 }) {
+          Text('网页打开失败')
+            .fontSize(Math.round(17 * getUiScale()))
+            .fontWeight(FontWeight.Medium)
+            .fontColor(C('text_primary'))
+          Text('请检查网络后重试')
+            .fontSize(Math.round(12 * getUiScale()))
+            .fontColor(C('text_tertiary'))
+          Row({ space: 12 }) {
+            Text('返回主页')
+              .fontSize(Math.round(14 * getUiScale()))
+              .fontColor(C('text_secondary'))
+              .padding({ left: 20, right: 20, top: 9, bottom: 9 })
+              .borderRadius(20)
+              .backgroundColor(C('surface_alt'))
+              .onClick(() => this.goHome())
+            Text('重试')
+              .fontSize(Math.round(14 * getUiScale()))
+              .fontWeight(FontWeight.Medium)
+              .fontColor(C('page_bg'))
+              .padding({ left: 22, right: 22, top: 9, bottom: 9 })
+              .borderRadius(20)
+              .backgroundColor(C('accent'))
+              .onClick(() => this.retryActive())
+          }
+        }
+        .width('100%')
+        .height('100%')
+        .justifyContent(FlexAlign.Center)
+      }
+
+      if (this.dialEditorVisible) {
+        DialEditSheet({
+          isEditing: this.dialEditing !== null,
+          editName: this.dialEditing !== null ? this.dialEditing.name : '',
+          editUrl: this.dialEditing !== null ? this.dialEditing.url : '',
+          onSave: (name: string, url: string) => this.saveDial(name, url),
+          onDelete: () => this.deleteDial(),
+          onClose: () => {
+            this.dialEditorVisible = false;
+          }
+        })
       }
 
       if (this.settingsVisible) {

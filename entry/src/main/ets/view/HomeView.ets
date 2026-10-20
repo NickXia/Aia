@@ -1,50 +1,54 @@
-import { HistoryEntry } from '../model/Models';
+import { HistoryEntry, DialItem } from '../model/Models';
 import { colorForHost, hostOf, prettyUrl } from '../common/UrlUtils';
 import { ZFont, ZSpace, getUiScale } from '../common/AiaTheme';
 import { C } from '../common/AiaTheme';
-import { hilog } from '@kit.PerformanceAnalysisKit';
 
-/** 快捷入口数据直接内联在本文件，避免跨模块初始化时序问题 */
-interface DialItem {
-  name: string;
-  url: string;
-  color: string;
-}
-
-const DIALS: DialItem[] = [
-  { name: '百度', url: 'https://www.baidu.com', color: '#3F7BFF' },
-  { name: '知乎', url: 'https://www.zhihu.com', color: '#1B7CF2' },
-  { name: 'B站', url: 'https://m.bilibili.com', color: '#FB7299' },
-  { name: '微博', url: 'https://m.weibo.cn', color: '#E6412E' },
-  { name: '淘宝', url: 'https://www.taobao.com', color: '#FF6A00' },
-  { name: '豆瓣', url: 'https://www.douban.com', color: '#2FA84F' },
-  { name: 'GitHub', url: 'https://github.com', color: '#4285F4' },
-  { name: '少数派', url: 'https://sspai.com', color: '#D5413F' }
-];
+/** 主页快捷方式数量上限 */
+const MAX_DIALS: number = 12;
 
 /**
  * 新标签页（Aia 主页）
- * 只放：品牌标识 + 快捷方式网格 + 最近访问。不放搜索框，
- * 因为搜索框就在屏幕顶部，重复的搜索框只会增加噪音。
+ * 品牌 + 可编辑快捷方式网格（点按打开 / 长按编辑 / 末尾 + 新增）+ 最近访问。
  */
 @Component
 export struct HomeView {
   @Prop recents: HistoryEntry[];
+  @Prop dials: DialItem[];
   onOpen: (url: string) => void = () => {
   };
+  /** 长按快捷方式：编辑（item）/ 新增（null） */
+  onEditDial: (item: DialItem | null) => void = () => {
+  };
 
-  aboutToAppear(): void {
-    // 真机排障：若快捷方式仍不显示，可用 hilog 查看数据是否就绪
-    hilog.info(0xA0000, 'AiaHome', 'dials ready: %{public}d', DIALS.length);
-  }
-
-  /** 每 4 个一行，纯 Row/Column 渲染，不依赖任何高级容器 */
+  /** 每 4 个一行，纯 Row/Column 渲染；添加格独立渲染在网格之后（保证唯一） */
   private dialRows(): DialItem[][] {
     const rows: DialItem[][] = [];
-    for (let i = 0; i < DIALS.length; i += 4) {
-      rows.push(DIALS.slice(i, i + 4));
+    for (let i = 0; i < this.dials.length; i += 4) {
+      rows.push(this.dials.slice(i, i + 4));
     }
     return rows;
+  }
+
+  @Builder
+  addTile() {
+    Column({ space: 8 }) {
+      Stack() {
+        Text('＋')
+          .fontSize(Math.round(19 * getUiScale()))
+          .fontColor(C('text_tertiary'))
+      }
+      .width(Math.round(52 * getUiScale()))
+      .height(Math.round(52 * getUiScale()))
+      .borderRadius(Math.round(26 * getUiScale()))
+      .backgroundColor(C('surface_alt'))
+
+      Text('添加')
+        .fontSize(ZFont.caption)
+        .fontColor(C('text_secondary'))
+    }
+    .width(Math.round(52 * getUiScale()) + Math.round(20 * getUiScale()))
+    .padding({ top: ZSpace.sm, bottom: ZSpace.sm })
+    .onClick(() => this.onEditDial(null))
   }
 
   @Builder
@@ -71,6 +75,10 @@ export struct HomeView {
     .layoutWeight(1)
     .padding({ top: ZSpace.sm, bottom: ZSpace.sm })
     .onClick(() => this.onOpen(item.url))
+    .gesture(LongPressGesture({ repeat: false })
+      .onAction(() => {
+        this.onEditDial(item);
+      }))
   }
 
   @Builder
@@ -157,10 +165,19 @@ export struct HomeView {
           Row() {
             ForEach(row, (item: DialItem) => {
               this.dialItem(item)
-            }, (item: DialItem) => item.url)
+            }, (item: DialItem) => item.url + '#' + item.name)
           }
           .width('100%')
-        }, (row: DialItem[]) => row[0].url)
+        }, (row: DialItem[]) => row[0].url + '#' + row[0].name)
+
+        // 新增入口：独立渲染，永远只有一个
+        if (this.dials.length < MAX_DIALS) {
+          Row() {
+            this.addTile()
+          }
+          .width('100%')
+          .justifyContent(FlexAlign.Center)
+        }
 
         // 最近访问
         if (this.recents.length > 0) {
