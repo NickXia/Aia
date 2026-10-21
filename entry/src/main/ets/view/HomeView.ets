@@ -60,6 +60,31 @@ export struct HomeView {
     return '#' + to2(r) + to2(g) + to2(b);
   }
 
+  /** 按时段生成问候语 */
+  private greeting(): string {
+    const h: number = new Date().getHours();
+    if (h < 5) {
+      return '夜深了';
+    }
+    if (h < 11) {
+      return '早上好';
+    }
+    if (h < 14) {
+      return '中午好';
+    }
+    if (h < 18) {
+      return '下午好';
+    }
+    return '晚上好';
+  }
+
+  /** 日期行：X月X日 星期X */
+  private dateLine(): string {
+    const now: Date = new Date();
+    const week: string[] = ['日', '一', '二', '三', '四', '五', '六'];
+    return (now.getMonth() + 1) + '月' + now.getDate() + '日' + ' 星期' + week[now.getDay()];
+  }
+
   @Builder
   dialItem(item: DialItem) {
     Column({ space: 8 }) {
@@ -106,13 +131,17 @@ export struct HomeView {
       Stack() {
         Text(hostOf(item.url).substring(0, 1).toUpperCase())
           .fontSize(Math.round(12 * getUiScale()))
-          .fontWeight(FontWeight.Medium)
-          .fontColor(colorForHost(hostOf(item.url)))
+          .fontWeight(FontWeight.Bold)
+          .fontColor(Color.White)
       }
       .width(28)
       .height(28)
       .borderRadius(9)
-      .backgroundColor(C('surface_alt'))
+      .shadow(ShadowStyle.OUTER_DEFAULT_SM)
+      .linearGradient({
+        angle: 135,
+        colors: [[colorForHost(hostOf(item.url)), 0], [this.darken(colorForHost(hostOf(item.url)), 0.62), 1]]
+      })
 
       Column({ space: 2 }) {
         Text(item.title.length > 0 ? item.title : prettyUrl(item.url))
@@ -140,44 +169,25 @@ export struct HomeView {
   build() {
     Scroll() {
       Column() {
-        // 品牌区：居中 logo + 印章 + 远山
-        Stack({ alignContent: Alignment.Bottom }) {
-          Image($r('app.media.ic_hills'))
+        // 问候区：当代浏览器的个性化起点
+        Column({ space: 3 }) {
+          Text(this.greeting())
+            .fontSize(Math.round(26 * getUiScale()))
+            .fontWeight(FontWeight.Bold)
+            .fontColor(C('text_primary'))
             .width('100%')
-            .height(86)
-            .objectFit(ImageFit.Fill)
+            .textAlign(TextAlign.Start)
 
-          Column() {
-            Row({ space: 10 }) {
-              Text('Aia')
-                .fontSize(Math.round(32 * getUiScale()))
-                .fontWeight(FontWeight.Medium)
-                .fontFamily('serif')
-                .fontColor(C('text_primary'))
-                .letterSpacing(8)
-              Text('雅')
-                .fontSize(Math.round(11 * getUiScale()))
-                .fontFamily('serif')
-                .fontColor(C('page_bg'))
-                .width(20)
-                .height(20)
-                .textAlign(TextAlign.Center)
-                .borderRadius(3)
-                .backgroundColor(C('seal'))
-            }
-            .alignItems(VerticalAlign.Center)
-
-            Text('简单到只剩你需要的')
-              .fontSize(Math.round(13 * getUiScale()))
-              .fontFamily('serif')
-              .fontColor(C('text_secondary'))
-              .letterSpacing(4)
-              .margin({ top: 10 })
-          }
-          .width('100%')
+          Text(this.dateLine())
+            .fontSize(Math.round(13 * getUiScale()))
+            .fontColor(C('text_tertiary'))
+            .width('100%')
+            .textAlign(TextAlign.Start)
+            .margin({ top: 2 })
         }
         .width('100%')
-        .margin({ top: 42, bottom: 26 })
+        .alignItems(HorizontalAlign.Start)
+        .margin({ top: 34, bottom: 26 })
 
         // 快捷方式：手工分行，每行 4 个，「添加」格内联在最后一个之后
         ForEach(this.dialRows(), (row: DialItem[]) => {

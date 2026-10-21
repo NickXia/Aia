@@ -66,8 +66,8 @@ export function isSecure(url: string): boolean {
 
 /** 用域名生成稳定的占位色，标签卡片 / 站点图标用 */
 const PALETTE: string[] = [
-  '#3F7BFF', '#7C5CFF', '#E0574B', '#22A06B',
-  '#F2994A', '#0F9BD7', '#C4559B', '#5B6B7F'
+  '#4F6BFF', '#8B5CF6', '#FF5C5C', '#00C48C',
+  '#FF9F43', '#00A8E8', '#E84393', '#5B6B7F'
 ];
 
 export function colorForHost(host: string): string {
