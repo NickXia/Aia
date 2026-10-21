@@ -18,6 +18,10 @@ export class BrowserTab {
   lastNavTime: number = 0;
   /** 返回键按下后置位：下一个 about:blank pageEnd 代表「退到占位页」，应回主页 */
   expectBlankHome: boolean = false;
+  /** 本次导航是否收到过 onPageBegin（ArkWeb 对 DNS 失败等场景静默无回调，用于超时判定） */
+  pageBeginSeen: boolean = false;
+  /** 本次导航是否发生过资源加载错误（HTTP 404/超时等），用于过滤失败页入历史 */
+  loadError: boolean = false;
   controller: webview.WebviewController | null = null;
 
   constructor(id: string) {

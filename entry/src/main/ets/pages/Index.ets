@@ -132,6 +132,13 @@ struct Index {
       const fresh: boolean = Date.now() - tab.lastNavTime < 1600;
       if ((u === 'about:blank' || u.length === 0) && idle && !fresh) {
         this.goHome();
+        return;
+      }
+      // ArkWeb 对 DNS 解析失败等场景静默无回调：导航 15 秒后仍无任何
+      // pageBegin 且无加载活动 → 判定加载失败，弹错误卡给出出路
+      if (!tab.isLoading && !tab.pageBeginSeen && !this.loadFailed
+        && Date.now() - tab.lastNavTime > 15000) {
+        AppStorage.setOrCreate<boolean>('loadFailed', true);
       }
     } catch (err) {
       // 内核状态不可读时跳过本轮
@@ -240,6 +247,11 @@ struct Index {
       this.showHome = true;
       if (only.controller !== null) {
         only.controller.loadUrl('about:blank');
+        try {
+          only.controller.clearHistory();
+        } catch (err) {
+          // ignore
+        }
       }
       this.tabsVisible = false;
       return;
@@ -283,7 +295,10 @@ struct Index {
     tab.canGoBack = false;
     tab.canGoForward = false;
     tab.lastNavTime = Date.now();
+    tab.pageBeginSeen = false;
+    tab.loadError = false;
     tab.expectBlankHome = false;
+    AppStorage.setOrCreate<boolean>('loadFailed', false);
     tab.progress = 0;
     tab.isLoading = true;
     AppStorage.setOrCreate<number>('loadingPct', 0);
@@ -308,6 +323,13 @@ struct Index {
     this.showHome = true;
     if (tab.controller !== null) {
       tab.controller.loadUrl('about:blank');
+      // 清空网页历史：避免占位页/重定向垃圾滞留栈内，
+      // 让「进入网页 → 返回」始终一步回主页，且下次返回语义干净
+      try {
+        tab.controller.clearHistory();
+      } catch (err) {
+        // ignore
+      }
     }
   }
 
@@ -426,6 +448,9 @@ struct Index {
     if (!this.saveHistory || tab.url.length === 0) {
       return;
     }
+    if (tab.loadError) {
+      return; // 加载失败的页面不进历史（HTTP 错误页/超时页）
+    }
     if (tab.url.startsWith('about:') || tab.title === 'about:blank') {
       return;
     }
@@ -478,14 +503,35 @@ struct Index {
     }
   }
 
+  /** 危险操作二次确认：确认后执行 confirm()，取消不动作 */
+  private confirmThen(title: string, message: string, confirm: () => void): void {
+    const dialog = promptAction.showDialog({
+      title: title,
+      message: message,
+      buttons: [
+        { text: '取消', color: '#8A8270' },
+        { text: '确定', color: '#B4552E' }
+      ]
+    });
+    dialog.then((result) => {
+      if (result.index === 1) {
+        confirm();
+      }
+    }).catch(() => {
+    });
+  }
+
   private clearRecords(): void {
-    if (this.recordsMode === 'history') {
-      this.history = [];
-      AiaStore.clearHistory();
-    } else {
-      this.bookmarks = [];
-      AiaStore.saveBookmarks([]);
-    }
+    const isHistory: boolean = this.recordsMode === 'history';
+    this.confirmThen('确认清空', isHistory ? '将清空全部浏览记录，此操作不可恢复。' : '将清空全部书签，此操作不可恢复。', () => {
+      if (isHistory) {
+        this.history = [];
+        AiaStore.clearHistory();
+      } else {
+        this.bookmarks = [];
+        AiaStore.saveBookmarks([]);
+      }
+    });
   }
 
   private async copyUrl(): Promise<void> {
@@ -622,12 +668,20 @@ struct Index {
   private retryActive(): void {
     AppStorage.setOrCreate<boolean>('loadFailed', false);
     const tab: BrowserTab = this.activeTab();
-    if (tab.controller !== null) {
-      try {
+    if (tab.controller === null) {
+      return;
+    }
+    try {
+      if (tab.pageBeginSeen) {
+        // 内核已开始加载（HTTP 错误等）：刷新当前页即可
+        tab.loadError = false;
         tab.controller.refresh();
-      } catch (err) {
-        // ignore
+      } else {
+        // 静默失败（DNS 解析失败等）：refresh 无效，必须重新导航
+        this.navigate(tab.url);
       }
+    } catch (err) {
+      // ignore
     }
   }
 
@@ -651,7 +705,14 @@ struct Index {
     } else if (key === 'settings') {
       this.settingsVisible = true;
     } else if (key === 'close') {
-      this.closeTab(this.activeId);
+      const t: BrowserTab = this.activeTab();
+      if (t.url.length === 0) {
+        this.closeTab(t.id); // 空标签直接关
+      } else {
+        this.confirmThen('关闭标签', '将关闭「' + (t.title.length > 0 ? t.title : t.url) + '」，确认关闭？', () => {
+          this.closeTab(t.id);
+        });
+      }
     }
   }
 
@@ -771,6 +832,7 @@ struct Index {
         TabsPanel({
           infos: this.tabInfos(),
           activeId: this.activeId,
+          topAvoid: this.topAvoid,
           onSelect: (id: string) => this.activate(id),
           onCloseTab: (id: string) => this.closeTab(id),
           onCreate: () => this.createTab(),

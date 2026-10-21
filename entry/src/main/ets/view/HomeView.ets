@@ -48,20 +48,34 @@ export struct HomeView {
     return keys.join('|');
   }
 
+  /** 主色深化 30%：用于快捷方式色块的渐变末端 */
+  private darken(hex: string, factor: number): string {
+    let r: number = parseInt(hex.substring(1, 3), 16);
+    let g: number = parseInt(hex.substring(3, 5), 16);
+    let b: number = parseInt(hex.substring(5, 7), 16);
+    r = Math.round(r * factor);
+    g = Math.round(g * factor);
+    b = Math.round(b * factor);
+    const to2: (v: number) => string = (v: number): string => v.toString(16).padStart(2, '0');
+    return '#' + to2(r) + to2(g) + to2(b);
+  }
+
   @Builder
   dialItem(item: DialItem) {
     Column({ space: 8 }) {
       Stack() {
         Text(item.url === '__add__' ? '＋' : item.name.substring(0, 1))
-          .fontSize(Math.round(19 * getUiScale()))
-          .fontWeight(item.url === '__add__' ? FontWeight.Normal : FontWeight.Medium)
-          .fontFamily(item.url === '__add__' ? 'HarmonyOS Sans' : 'serif')
-          .fontColor(item.url === '__add__' ? C('text_tertiary') : item.color)
+          .fontSize(Math.round(item.url === '__add__' ? 22 : 21 * getUiScale()))
+          .fontWeight(FontWeight.Bold)
+          .fontColor(item.url === '__add__' ? C('text_tertiary') : Color.White)
       }
       .width(Math.round(52 * getUiScale()))
       .height(Math.round(52 * getUiScale()))
-      .borderRadius(Math.round(26 * getUiScale()))
-      .backgroundColor(C('surface_alt'))
+      .borderRadius(Math.round(16 * getUiScale()))
+      .shadow(ShadowStyle.OUTER_DEFAULT_SM)
+      .linearGradient(item.url === '__add__'
+        ? { angle: 135, colors: [[C('surface_alt'), 0], [C('surface_alt_2'), 1]] }
+        : { angle: 135, colors: [[item.color, 0], [this.darken(item.color, 0.62), 1]] })
 
       Text(item.url === '__add__' ? '添加' : item.name)
         .fontSize(ZFont.caption)

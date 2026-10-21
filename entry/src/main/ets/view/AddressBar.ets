@@ -48,7 +48,9 @@ export struct AddressBar {
     .borderRadius(ZRadius.pill)
     .backgroundColor(C('surface_alt'))
     .onClick(() => {
-      this.draft = this.tab.url;
+      // 点击进入编辑态时清空草稿：用户点击地址栏的意图是「新搜索/新网址」，
+      // 预填旧 URL 会导致打字追加到原网址后面（真实场景产生 404/400）
+      this.draft = '';
       this.editing = true;
     })
   }
@@ -56,7 +58,7 @@ export struct AddressBar {
   @Builder
   editor() {
     Row({ space: 4 }) {
-      TextInput({ text: this.draft, placeholder: '搜索或输入网址' })
+      TextInput({ text: this.draft, placeholder: this.home ? '搜索或输入网址' : prettyUrl(this.tab.url) })
         .id('aia-address')
         .layoutWeight(1)
         .height(ZSize.pill)

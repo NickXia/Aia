@@ -33,9 +33,9 @@ export class ZSpace {
 
 export class ZRadius {
   static get pill(): number { return 100; }
-  static get card(): number { return vs(16); }
-  static get sheet(): number { return vs(24); }
-  static get small(): number { return vs(10); }
+  static get card(): number { return vs(18); }
+  static get sheet(): number { return vs(28); }
+  static get small(): number { return vs(12); }
 }
 
 export class ZFont {
@@ -73,33 +73,35 @@ export function getThemeMode(): ThemeMode {
 }
 
 const SYS_LIGHT: Record<string, string> = {
-  'page_bg': '#F8F5EC',
-  'surface': '#F6F2E8',
-  'surface_alt': '#ECE6D6',
-  'surface_alt_2': '#E2DAC5',
-  'divider': '#DDD4BF',
-  'text_primary': '#211E18',
-  'text_secondary': '#57503F',
-  'text_tertiary': '#8A8270',
-  'accent': '#3E5C63',
-  'danger': '#A83F2E',
-  'seal': '#A83F2E',
-  'scrim': '#5C28241C'
+  'page_bg': '#F5F6FA',
+  'surface': '#FFFFFF',
+  'surface_alt': '#EDF0F7',
+  'surface_alt_2': '#E3E7F0',
+  'divider': '#E5E8F0',
+  'text_primary': '#17181C',
+  'text_secondary': '#4E5462',
+  'text_tertiary': '#9AA0AE',
+  'accent': '#3D5BFF',
+  'accent_2': '#8A4BF2',
+  'danger': '#E5484D',
+  'seal': '#3D5BFF',
+  'scrim': '#14161F99'
 };
 
 const SYS_DARK: Record<string, string> = {
-  'page_bg': '#1C1C1A',
-  'surface': '#222220',
-  'surface_alt': '#2B2B28',
-  'surface_alt_2': '#343430',
-  'divider': '#38372F',
-  'text_primary': '#F2EEE2',
-  'text_secondary': '#C0B8A4',
-  'text_tertiary': '#928C7A',
-  'accent': '#93B1A5',
-  'danger': '#C05A48',
-  'seal': '#B0503C',
-  'scrim': '#A0000000'
+  'page_bg': '#0F1117',
+  'surface': '#171A23',
+  'surface_alt': '#21252F',
+  'surface_alt_2': '#2A2F3B',
+  'divider': '#262B36',
+  'text_primary': '#F0F2F8',
+  'text_secondary': '#B7BCC9',
+  'text_tertiary': '#7C828F',
+  'accent': '#6C8CFF',
+  'accent_2': '#A87BFF',
+  'danger': '#FF6B6E',
+  'seal': '#6C8CFF',
+  'scrim': '#CC000510'
 };
 
 /** 羊皮卷阅读主题：暖纸底 + 深棕墨字 + 皮革棕强调，昼夜通用 */

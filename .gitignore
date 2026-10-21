@@ -9,3 +9,7 @@
 /.clang-tidy
 **/.test
 .DS_Store
+certs/
+*.p12
+*.cer
+*.p7b

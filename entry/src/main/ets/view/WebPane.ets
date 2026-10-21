@@ -89,6 +89,8 @@ export struct WebPane {
           console.info('AiaWeb pageBegin (placeholder, ignored)');
           return;
         }
+        this.tab.pageBeginSeen = true;
+        this.tab.loadError = false;
         console.info('AiaWeb pageBegin ' + current);
         this.tab.url = current;
         this.tab.isLoading = true;
@@ -165,6 +167,7 @@ export struct WebPane {
       // 报错页（登录墙、断网等）不会触发 onPageEnd，必须在这里结束加载状态，
       // 否则进度条会永远卡住
       .onErrorReceive(() => {
+        this.tab.loadError = true;
         this.tab.isLoading = false;
         this.tab.progress = 100;
         this.syncLoading();
