@@ -20,64 +20,69 @@ export struct HomeView {
   onEditDial: (item: DialItem | null) => void = () => {
   };
 
-  /** 每 4 个一行，纯 Row/Column 渲染；添加格独立渲染在网格之后（保证唯一） */
+  /** 每 4 个一行；「添加」格紧跟最后一个快捷方式（行满才另起一行），稳定键避免 diff 残留 */
   private dialRows(): DialItem[][] {
     const rows: DialItem[][] = [];
-    for (let i = 0; i < this.dials.length; i += 4) {
-      rows.push(this.dials.slice(i, i + 4));
+    const showAdd: boolean = this.dials.length < MAX_DIALS;
+    const total: number = this.dials.length + (showAdd ? 1 : 0);
+    let i = 0;
+    while (i < total) {
+      const row: DialItem[] = [];
+      for (let j = 0; j < 4 && i < total; j++, i++) {
+        if (i < this.dials.length) {
+          row.push(this.dials[i]);
+        } else {
+          row.push({ name: '＋', url: '__add__', color: '#8A8270' });
+        }
+      }
+      rows.push(row);
     }
     return rows;
   }
 
-  @Builder
-  addTile() {
-    Column({ space: 8 }) {
-      Stack() {
-        Text('＋')
-          .fontSize(Math.round(19 * getUiScale()))
-          .fontColor(C('text_tertiary'))
-      }
-      .width(Math.round(52 * getUiScale()))
-      .height(Math.round(52 * getUiScale()))
-      .borderRadius(Math.round(26 * getUiScale()))
-      .backgroundColor(C('surface_alt'))
-
-      Text('添加')
-        .fontSize(ZFont.caption)
-        .fontColor(C('text_secondary'))
+  private rowKey(row: DialItem[]): string {
+    const keys: string[] = [];
+    for (let i = 0; i < row.length; i++) {
+      keys.push(row[i].url + '#' + row[i].name);
     }
-    .width(Math.round(52 * getUiScale()) + Math.round(20 * getUiScale()))
-    .padding({ top: ZSpace.sm, bottom: ZSpace.sm })
-    .onClick(() => this.onEditDial(null))
+    return keys.join('|');
   }
 
   @Builder
   dialItem(item: DialItem) {
     Column({ space: 8 }) {
       Stack() {
-        Text(item.name.substring(0, 1))
+        Text(item.url === '__add__' ? '＋' : item.name.substring(0, 1))
           .fontSize(Math.round(19 * getUiScale()))
-          .fontWeight(FontWeight.Medium)
-          .fontFamily('serif')
-          .fontColor(item.color)
+          .fontWeight(item.url === '__add__' ? FontWeight.Normal : FontWeight.Medium)
+          .fontFamily(item.url === '__add__' ? 'HarmonyOS Sans' : 'serif')
+          .fontColor(item.url === '__add__' ? C('text_tertiary') : item.color)
       }
       .width(Math.round(52 * getUiScale()))
       .height(Math.round(52 * getUiScale()))
       .borderRadius(Math.round(26 * getUiScale()))
       .backgroundColor(C('surface_alt'))
 
-      Text(item.name)
+      Text(item.url === '__add__' ? '添加' : item.name)
         .fontSize(ZFont.caption)
-        .fontColor(C('text_secondary'))
+        .fontColor(item.url === '__add__' ? C('text_tertiary') : C('text_secondary'))
         .maxLines(1)
         .textOverflow({ overflow: TextOverflow.Ellipsis })
     }
     .layoutWeight(1)
     .padding({ top: ZSpace.sm, bottom: ZSpace.sm })
-    .onClick(() => this.onOpen(item.url))
+    .onClick(() => {
+      if (item.url === '__add__') {
+        this.onEditDial(null);
+      } else {
+        this.onOpen(item.url);
+      }
+    })
     .gesture(LongPressGesture({ repeat: false })
       .onAction(() => {
-        this.onEditDial(item);
+        if (item.url !== '__add__') {
+          this.onEditDial(item);
+        }
       }))
   }
 
@@ -160,7 +165,7 @@ export struct HomeView {
         .width('100%')
         .margin({ top: 42, bottom: 26 })
 
-        // 快捷方式：手工分行，每行 4 个
+        // 快捷方式：手工分行，每行 4 个，「添加」格内联在最后一个之后
         ForEach(this.dialRows(), (row: DialItem[]) => {
           Row() {
             ForEach(row, (item: DialItem) => {
@@ -168,16 +173,7 @@ export struct HomeView {
             }, (item: DialItem) => item.url + '#' + item.name)
           }
           .width('100%')
-        }, (row: DialItem[]) => row[0].url + '#' + row[0].name)
-
-        // 新增入口：独立渲染，永远只有一个
-        if (this.dials.length < MAX_DIALS) {
-          Row() {
-            this.addTile()
-          }
-          .width('100%')
-          .justifyContent(FlexAlign.Center)
-        }
+        }, (row: DialItem[]) => this.rowKey(row))
 
         // 最近访问
         if (this.recents.length > 0) {

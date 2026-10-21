@@ -81,6 +81,9 @@ struct Index {
     if (this.readingTheme) {
       setThemeMode('parchment');
     }
+    // 空白页看门狗：任何未知路径把应用留在占位页超过 1.6 秒，自动回主页。
+    // 覆盖系统边缘返回手势等无法穷举的时序，保证用户永远不会面对白屏。
+    setInterval(() => this.blankWatchdog(), 700);
     // 全屏布局下按系统避让高度留白（px -> vp）
     const topPx: number = AppStorage.get<number>('topAvoidPx') ?? 0;
     const bottomPx: number = AppStorage.get<number>('bottomAvoidPx') ?? 0;
@@ -113,9 +116,29 @@ struct Index {
     }
   }
 
-  onBackPress(): boolean {
-    if (this.dialEditorVisible) {
-      this.dialEditorVisible = false;
+  /** 空白页看门狗：非主页状态下停留在占位页且无加载活动 → 自愈回主页 */
+  private blankWatchdog(): void {
+    if (this.showHome || this.loadFailed || this.dialEditorVisible || this.menuVisible
+      || this.settingsVisible || this.recordsVisible || this.tabsVisible) {
+      return;
+    }
+    const tab: BrowserTab = this.activeTab();
+    if (tab.controller === null) {
+      return;
+    }
+    try {
+      const u: string = tab.controller.getUrl();
+      const idle: boolean = !tab.isLoading && !tab.expectBlankHome;
+      const fresh: boolean = Date.now() - tab.lastNavTime < 1600;
+      if ((u === 'about:blank' || u.length === 0) && idle && !fresh) {
+        this.goHome();
+      }
+    } catch (err) {
+      // 内核状态不可读时跳过本轮
+    }
+  }
+
+  onBackPress(): boolean {    if (this.dialEditorVisible) {      this.dialEditorVisible = false;
       return true;
     }
     if (this.menuVisible) {

@@ -36,6 +36,19 @@
           "storeFile": "C:\\Users\\Xzz18\\.ohos\\config\\default_Aia_OK-oYf9k2b1ObQqy2iyt_6aQB0kEKudTq4yr94all9U=.p12",
           "storePassword": "00000019B53A278F321619574224700A795709DD65AF2B0E698AA1BF3C4021BDBC73F79F8E0826172B"
         }
+      },
+      {
+        "name": "release",
+        "type": "HarmonyOS",
+        "material": {
+          "certpath": "D:\\HarmonyProjects\\Aia\\certs\\aia_release.cer",
+          "keyAlias": "debugKey",
+          "keyPassword": "0000001960E773A9F08A9E6F460F1AA1D9D40D3D38B08274C541B171B169F9EA9BA1F3EB032E80EDF6",
+          "profile": "D:\\HarmonyProjects\\Aia\\certs\\aia_release_profileRelease.p7b",
+          "signAlg": "SHA256withECDSA",
+          "storeFile": "C:\\Users\\Xzz18\\.ohos\\config\\default_Aia_OK-oYf9k2b1ObQqy2iyt_6aQB0kEKudTq4yr94all9U=.p12",
+          "storePassword": "00000019B53A278F321619574224700A795709DD65AF2B0E698AA1BF3C4021BDBC73F79F8E0826172B"
+        }
       }
     ]
   },

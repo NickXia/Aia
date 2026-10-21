@@ -40,6 +40,22 @@ export struct DialEditSheet {
 
       Column() {
         Row() {
+          if (this.isEditing) {
+            Text('删除')
+              .fontSize(ZFont.body)
+              .fontColor(C('danger'))
+              .padding({ left: 4, right: 10, top: 6, bottom: 6 })
+              .onClick(() => this.onDelete())
+          } else {
+            Text('取消')
+              .fontSize(ZFont.body)
+              .fontColor(C('text_secondary'))
+              .padding({ left: 4, right: 10, top: 6, bottom: 6 })
+              .onClick(() => this.onClose())
+          }
+
+          Blank()
+
           Text(this.isEditing ? '编辑快捷方式' : '添加快捷方式')
             .fontSize(ZFont.title)
             .fontWeight(FontWeight.Medium)
@@ -47,14 +63,15 @@ export struct DialEditSheet {
 
           Blank()
 
-          Text('完成')
+          Text('保存')
             .fontSize(ZFont.body)
+            .fontWeight(FontWeight.Medium)
             .fontColor(C('accent'))
             .padding({ left: 10, right: 4, top: 6, bottom: 6 })
-            .onClick(() => this.onClose())
+            .onClick(() => this.submit())
         }
         .width('100%')
-        .padding({ left: ZSpace.page, right: ZSpace.md, top: 6, bottom: 10 })
+        .padding({ left: ZSpace.md, right: ZSpace.md, top: 6, bottom: 10 })
 
         Column({ space: 10 }) {
           Column({ space: 5 }) {
@@ -102,41 +119,9 @@ export struct DialEditSheet {
         .width('100%')
         .padding({ left: ZSpace.page, right: ZSpace.page })
 
-        Row({ space: 12 }) {
-          if (this.isEditing) {
-            Text('删除')
-              .fontSize(ZFont.body)
-              .fontColor(C('danger'))
-              .padding({ left: 18, right: 18, top: 9, bottom: 9 })
-              .borderRadius(20)
-              .backgroundColor(C('surface_alt'))
-              .onClick(() => this.onDelete())
-          }
-
-          Blank()
-
-          Text('取消')
-            .fontSize(ZFont.body)
-            .fontColor(C('text_secondary'))
-            .padding({ left: 18, right: 18, top: 9, bottom: 9 })
-            .borderRadius(20)
-            .backgroundColor(C('surface_alt'))
-            .onClick(() => this.onClose())
-
-          Text('保存')
-            .fontSize(ZFont.body)
-            .fontWeight(FontWeight.Medium)
-            .fontColor(C('page_bg'))
-            .padding({ left: 22, right: 22, top: 9, bottom: 9 })
-            .borderRadius(20)
-            .backgroundColor(C('accent'))
-            .onClick(() => this.onSave(this.draftName.trim(), this.draftUrl.trim()))
-        }
-        .width('100%')
-        .padding({ left: ZSpace.page, right: ZSpace.page, top: 14, bottom: 20 })
       }
       .width('100%')
-      .padding({ top: 10, bottom: 14 })
+      .padding({ top: 10, bottom: 40 })
       .borderRadius({ topLeft: ZRadius.sheet, topRight: ZRadius.sheet })
       .backgroundColor(C('surface'))
     }
