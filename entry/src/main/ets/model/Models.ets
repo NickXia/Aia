@@ -93,3 +93,29 @@ export interface DialItem {
   url: string;
   color: string;
 }
+
+/** 下载任务状态：progressing / paused / done / failed / canceled */
+@Observed
+export class DownloadItem {
+  guid: string;
+  url: string;
+  fileName: string;
+  path: string;
+  total: number;
+  received: number;
+  speed: number;
+  state: string;
+  time: number;
+
+  constructor(guid: string, url: string, fileName: string, path: string) {
+    this.guid = guid;
+    this.url = url;
+    this.fileName = fileName;
+    this.path = path;
+    this.total = 0;
+    this.received = 0;
+    this.speed = 0;
+    this.state = 'progressing';
+    this.time = Date.now();
+  }
+}

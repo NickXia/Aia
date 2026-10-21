@@ -18,6 +18,7 @@ export struct SettingsPanel {
   @Prop bgPath: string;
   @Prop elderMode: boolean;
   @Prop readingTheme: boolean;
+  @Prop desktopUA: boolean;
 
   onToggle: (key: string, value: boolean) => void = () => {
   };
@@ -280,7 +281,7 @@ export struct SettingsPanel {
               this.switchRow('阻止图片加载', '省流量，弱网下更快', this.blockImages, 'blockImages', false)
               this.switchRow('保存浏览记录', '', this.saveHistory, 'saveHistory', false)
               this.switchRow('允许 JavaScript', '关闭后部分网页无法正常显示', this.jsEnabled, 'js', false)
-              this.switchRow('发送「不追踪」请求', '', this.dnt, 'dnt', true)
+              this.switchRow('桌面版网页', '以电脑版方式浏览网页', this.desktopUA, 'desktopUA', true)
             }
             .width('100%')
             .padding({ left: 14, right: 14 })

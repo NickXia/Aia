@@ -15,6 +15,21 @@ export struct WebPane {
   @Prop doNotTrack: boolean;
   /** 阅读模式（羊皮卷）：给网页内容注入暖色滤镜 */
   @Prop readingTheme: boolean;
+  /** 桌面版 UA：切换后对当前 Web 上下文生效 */
+  @Prop @Watch('applyUa') desktopUA: boolean;
+
+  private applyUa(): void {
+    try {
+      this.controller.setCustomUserAgent(this.desktopUA
+        ? 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36'
+        : '');
+      if (this.desktopUA && this.tab.url.length > 0) {
+        this.controller.refresh();
+      }
+    } catch (err) {
+      // ignore
+    }
+  }
   onPageStart: (tab: BrowserTab) => void = () => {
   };
   onPageFinished: (tab: BrowserTab) => void = () => {
@@ -72,6 +87,13 @@ export struct WebPane {
       .verticalScrollBarAccess(false)
       .onControllerAttached(() => {
         this.tab.controller = this.controller;
+        try {
+          this.controller.setCustomUserAgent(this.desktopUA
+            ? 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36'
+            : '');
+        } catch (err) {
+          // ignore
+        }
         if (this.tab.url.length > 0) {
           this.controller.loadUrl(this.tab.url);
         }

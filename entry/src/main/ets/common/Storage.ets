@@ -1,6 +1,6 @@
 import { preferences } from '@kit.ArkData';
 import { common } from '@kit.AbilityKit';
-import { Bookmark, HistoryEntry, RecordJson, DialItem } from '../model/Models';
+import { Bookmark, HistoryEntry, RecordJson, DialItem, DownloadItem } from '../model/Models';
 
 const KEY_DIALS: string = 'dials';
 
@@ -30,6 +30,8 @@ const KEY_DNT: string = 'do_not_track';
 const KEY_BG_IMAGE: string = 'bg_image';
 const KEY_ELDER: string = 'elder_mode';
 const KEY_READING: string = 'reading_theme';
+const KEY_DOWNLOADS: string = 'downloads';
+const KEY_DESKTOP_UA: string = 'desktop_ua';
 
 /**
  * 轻量本地存储。全部走 Preferences，读写都是同步的（数据量很小）。
@@ -252,5 +254,53 @@ export class AiaStore {
 
   static clearHistory(): void {
     AiaStore.put(KEY_HISTORY, '[]');
+  }
+
+  // ------------------------------------------------------------ 下载记录
+  static loadDownloads(): DownloadItem[] {
+    const result: DownloadItem[] = [];
+    try {
+      const arr: object[] = JSON.parse(AiaStore.getString(KEY_DOWNLOADS, '[]')) as object[];
+      for (let i = 0; i < arr.length; i++) {
+        const o = arr[i] as Record<string, string | number>;
+        const d: DownloadItem = new DownloadItem(
+          o['guid'] as string, o['url'] as string,
+          o['fileName'] as string, o['path'] as string);
+        d.total = typeof o['total'] === 'number' ? o['total'] as number : 0;
+        d.received = typeof o['received'] === 'number' ? o['received'] as number : 0;
+        d.state = (o['state'] as string) === 'progressing' ? 'failed' : o['state'] as string;
+        d.time = typeof o['time'] === 'number' ? o['time'] as number : 0;
+        result.push(d);
+      }
+    } catch (err) {
+      return [];
+    }
+    return result;
+  }
+
+  static saveDownloads(list: DownloadItem[]): void {
+    const raw: Record<string, string | number>[] = [];
+    for (let i = 0; i < list.length; i++) {
+      const d = list[i];
+      const o: Record<string, string | number> = {
+        'guid': d.guid, 'url': d.url, 'fileName': d.fileName, 'path': d.path,
+        'total': d.total, 'received': d.received, 'state': d.state, 'time': d.time
+      };
+      raw.push(o);
+    }
+    AiaStore.put(KEY_DOWNLOADS, JSON.stringify(raw));
+  }
+
+  static get desktopUA(): boolean {
+    return AiaStore.getBool(KEY_DESKTOP_UA, false);
+  }
+
+  static set desktopUA(v: boolean) {
+    AiaStore.put(KEY_DESKTOP_UA, v);
+  }
+
+  /** 保留最近 50 条下载记录 */
+  static trimDownloads(list: DownloadItem[]): DownloadItem[] {
+    return list.length > 50 ? list.slice(0, 50) : list;
   }
 }

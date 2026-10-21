@@ -1,4 +1,7 @@
 import { promptAction } from '@kit.ArkUI';
+import { webview } from '@kit.ArkWeb';
+import { DownloadsPanel } from '../view/DownloadsPanel';
+import { DownloadItem } from '../model/Models';
 import { pasteboard } from '@kit.BasicServicesKit';
 import { photoAccessHelper } from '@kit.MediaLibraryKit';
 import { fileIo, fileUri } from '@kit.CoreFileKit';
@@ -58,6 +61,10 @@ struct Index {
   @StorageLink('themeEpoch') themeEpoch: number = 0;
   /** 活动标签网页加载失败（WebPane 写入），显示错误出路 */
   @StorageLink('loadFailed') loadFailed: boolean = false;
+  @State downloads: DownloadItem[] = AiaStore.loadDownloads();
+  @State downloadsVisible: boolean = false;
+  @State desktopUA: boolean = AiaStore.desktopUA;
+  private downloadDelegate: webview.WebDownloadDelegate = new webview.WebDownloadDelegate();
 
   private seq: number = 0;
 
@@ -77,10 +84,76 @@ struct Index {
       setUiScale(1.25);
     }
     // 阅读模式（羊皮卷主题）
+    this.desktopUA = AiaStore.desktopUA;
     this.readingTheme = AiaStore.readingTheme;
     if (this.readingTheme) {
       setThemeMode('parchment');
     }
+    // 下载委托：全局注册一次，网页触发的下载统一走这里
+    this.downloadDelegate.onBeforeDownload((item: webview.WebDownloadItem) => {
+      const url: string = item.getUrl();
+      let name: string = url.substring(url.lastIndexOf('/') + 1).split('?')[0];
+      if (name.length === 0) {
+        name = 'download_' + Date.now();
+      }
+      const dir: string = getContext(this).filesDir + '/downloads';
+      try {
+        fileIo.mkdirSync(dir, true);
+      } catch (err) {
+        // 目录已存在
+      }
+      const path: string = dir + '/' + name;
+      const d: DownloadItem = new DownloadItem(item.getGuid(), url, name, path);
+      const list: DownloadItem[] = this.downloads.slice();
+      list.unshift(d);
+      this.downloads = AiaStore.trimDownloads(list);
+      AiaStore.saveDownloads(this.downloads);
+      item.start(path);
+    });
+    this.downloadDelegate.onDownloadUpdated((item: webview.WebDownloadItem) => {
+      for (let i = 0; i < this.downloads.length; i++) {
+        if (this.downloads[i].guid === item.getGuid()) {
+          this.downloads[i].received = item.getReceivedBytes();
+          this.downloads[i].total = item.getTotalBytes();
+          this.downloads[i].speed = item.getCurrentSpeed();
+          const st: webview.WebDownloadState = item.getState();
+          if (st === webview.WebDownloadState.PAUSED) {
+            this.downloads[i].state = 'paused';
+          }
+          const action: string = WebPendingAction.consume(item.getGuid());
+          if (action === 'pause') {
+            item.pause();
+          } else if (action === 'resume') {
+            item.resume();
+          } else if (action === 'cancel') {
+            item.cancel();
+          }
+          break;
+        }
+      }
+    });
+    this.downloadDelegate.onDownloadFinish((item: webview.WebDownloadItem) => {
+      for (let i = 0; i < this.downloads.length; i++) {
+        if (this.downloads[i].guid === item.getGuid()) {
+          this.downloads[i].state = 'done';
+          this.downloads[i].received = item.getTotalBytes();
+          this.downloads[i].total = item.getTotalBytes();
+          this.downloads[i].path = item.getFullPath();
+          break;
+        }
+      }
+      AiaStore.saveDownloads(this.downloads);
+      promptAction.showToast({ message: '下载完成' });
+    });
+    this.downloadDelegate.onDownloadFailed((item: webview.WebDownloadItem) => {
+      for (let i = 0; i < this.downloads.length; i++) {
+        if (this.downloads[i].guid === item.getGuid()) {
+          this.downloads[i].state = 'failed';
+          break;
+        }
+      }
+      AiaStore.saveDownloads(this.downloads);
+    });
     // 空白页看门狗：任何未知路径把应用留在占位页超过 1.6 秒，自动回主页。
     // 覆盖系统边缘返回手势等无法穷举的时序，保证用户永远不会面对白屏。
     setInterval(() => this.blankWatchdog(), 700);
@@ -154,6 +227,10 @@ struct Index {
     }
     if (this.tabsVisible) {
       this.tabsVisible = false;
+      return true;
+    }
+    if (this.downloadsVisible) {
+      this.downloadsVisible = false;
       return true;
     }
     if (this.recordsVisible) {
@@ -503,6 +580,44 @@ struct Index {
     }
   }
 
+  // ------------------------------------------------------------ 下载管理
+  private pauseResumeDownload(guid: string, toPause: boolean): void {
+    const delegate = this.downloadDelegate;
+    // 通过 WebDownloadManager 查找活动任务进行暂停/继续：
+    // ArkWeb 的暂停/继续需要在 delegate 回调持有的 item 上调用，
+    // 因此这里记录 pending 动作，由下一次 onDownloadUpdated 驱动。
+    for (let i = 0; i < this.downloads.length; i++) {
+      if (this.downloads[i].guid === guid) {
+        this.downloads[i].state = toPause ? 'paused' : 'progressing';
+        break;
+      }
+    }
+    AiaStore.saveDownloads(this.downloads);
+    WebPendingAction.set(guid, toPause ? 'pause' : 'resume');
+  }
+
+  private cancelDownload(guid: string): void {
+    WebPendingAction.set(guid, 'cancel');
+    for (let i = 0; i < this.downloads.length; i++) {
+      if (this.downloads[i].guid === guid) {
+        this.downloads[i].state = 'canceled';
+        break;
+      }
+    }
+    AiaStore.saveDownloads(this.downloads);
+  }
+
+  private deleteDownload(guid: string): void {
+    const rest: DownloadItem[] = [];
+    for (let i = 0; i < this.downloads.length; i++) {
+      if (this.downloads[i].guid !== guid) {
+        rest.push(this.downloads[i]);
+      }
+    }
+    this.downloads = rest;
+    AiaStore.saveDownloads(this.downloads);
+  }
+
   /** 危险操作二次确认：确认后执行 confirm()，取消不动作 */
   private confirmThen(title: string, message: string, confirm: () => void): void {
     const dialog = promptAction.showDialog({
@@ -698,6 +813,8 @@ struct Index {
       this.toggleBookmark();
     } else if (key === 'copy') {
       this.copyUrl();
+    } else if (key === 'downloads') {
+      this.downloadsVisible = true;
     } else if (key === 'reload') {
       this.reload();
     } else if (key === 'home') {
@@ -784,6 +901,7 @@ struct Index {
               blockImages: this.blockImages,
               jsEnabled: this.jsEnabled,
               doNotTrack: this.dnt,
+              desktopUA: this.desktopUA,
               readingTheme: this.readingTheme,
               onPageStart: (t: BrowserTab) => this.handlePageStart(t),
               onPageFinished: (t: BrowserTab) => this.handlePageFinished(t)
@@ -860,6 +978,18 @@ struct Index {
         })
       }
 
+      if (this.downloadsVisible) {
+        DownloadsPanel({
+          downloads: this.downloads,
+          onPauseResume: (guid: string, toPause: boolean) => this.pauseResumeDownload(guid, toPause),
+          onCancel: (guid: string) => this.cancelDownload(guid),
+          onDelete: (guid: string) => this.deleteDownload(guid),
+          onClose: () => {
+            this.downloadsVisible = false;
+          }
+        })
+      }
+
       // 加载指示放根 Stack（与菜单同层），确保盖在网页原生表面之上
       if (!this.showHome && this.loadingPct < 90) {
         Column({ space: 10 }) {
@@ -931,6 +1061,7 @@ struct Index {
           saveHistory: this.saveHistory,
           jsEnabled: this.jsEnabled,
           dnt: this.dnt,
+          desktopUA: this.desktopUA,
           bgPath: this.bgImage,
           elderMode: this.elderMode,
           readingTheme: this.readingTheme,
@@ -947,6 +1078,10 @@ struct Index {
             } else if (key === 'dnt') {
               this.dnt = value;
               AiaStore.doNotTrack = value;
+            } else if (key === 'desktopUA') {
+              this.desktopUA = value;
+              AiaStore.desktopUA = value;
+              promptAction.showToast({ message: value ? '已切换桌面版网页' : '已恢复手机版网页' });
             } else if (key === 'elderMode') {
               // 关怀模式：切换缩放因子并整树重建 UI
               this.elderMode = value;
@@ -988,5 +1123,22 @@ struct Index {
     .width('100%')
     .height('100%')
     .backgroundColor(C('page_bg'))
+  }
+}
+
+/** 挂起的下载动作队列：UI 面板发起，delegate 的下一次 onDownloadUpdated 消费 */
+export class WebPendingAction {
+  static map: Map<string, string> = new Map();
+
+  static set(guid: string, action: string): void {
+    WebPendingAction.map.set(guid, action);
+  }
+
+  static consume(guid: string): string {
+    const a: string | undefined = WebPendingAction.map.get(guid);
+    if (a !== undefined) {
+      WebPendingAction.map.delete(guid);
+    }
+    return a === undefined ? '' : a;
   }
 }
