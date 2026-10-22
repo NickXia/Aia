@@ -17,6 +17,10 @@ export struct DownloadsPanel {
   };
   onDelete: (guid: string) => void = () => {
   };
+  onOpen: (guid: string) => void = () => {
+  };
+  onExport: (guid: string) => void = () => {
+  };
   onClearAll: () => void = () => {
   };
   onClose: () => void = () => {
@@ -88,7 +92,9 @@ export struct DownloadsPanel {
                   item: item,
                   onPauseResume: (guid: string, toPause: boolean) => this.onPauseResume(guid, toPause),
                   onCancel: (guid: string) => this.onCancel(guid),
-                  onDelete: (guid: string) => this.onDelete(guid)
+                  onDelete: (guid: string) => this.onDelete(guid),
+                  onOpen: (guid: string) => this.onOpen(guid),
+                  onExport: (guid: string) => this.onExport(guid)
                 })
               }
             }, (item: DownloadItem) => item.guid)

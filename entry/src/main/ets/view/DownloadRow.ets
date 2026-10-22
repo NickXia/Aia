@@ -33,6 +33,10 @@ export struct DownloadRow {
   };
   onDelete: (guid: string) => void = () => {
   };
+  onOpen: (guid: string) => void = () => {
+  };
+  onExport: (guid: string) => void = () => {
+  };
 
   build() {
     Row({ space: 12 }) {
@@ -128,6 +132,18 @@ export struct DownloadRow {
           .padding({ left: 6, right: 6, top: 6, bottom: 6 })
           .onClick(() => this.onCancel(this.item.guid))
       } else {
+        if (this.item.state === 'done') {
+          Text('打开')
+            .fontSize(Math.round(12 * getUiScale()))
+            .fontColor(C('accent'))
+            .padding({ left: 5, right: 5, top: 6, bottom: 6 })
+            .onClick(() => this.onOpen(this.item.guid))
+          Text('导出')
+            .fontSize(Math.round(12 * getUiScale()))
+            .fontColor(C('text_secondary'))
+            .padding({ left: 5, right: 5, top: 6, bottom: 6 })
+            .onClick(() => this.onExport(this.item.guid))
+        }
         Image($r('app.media.ic_close_sm'))
           .width(12)
           .height(12)

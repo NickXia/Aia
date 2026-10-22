@@ -1,10 +1,12 @@
 import { promptAction } from '@kit.ArkUI';
 import { webview } from '@kit.ArkWeb';
+import { picker, fileUri, fileIo } from '@kit.CoreFileKit';
+import { common, Want, wantConstant } from '@kit.AbilityKit';
 import { DownloadsPanel } from '../view/DownloadsPanel';
 import { DownloadItem } from '../model/Models';
 import { pasteboard } from '@kit.BasicServicesKit';
+import { BusinessError } from '@kit.BasicServicesKit';
 import { photoAccessHelper } from '@kit.MediaLibraryKit';
-import { fileIo, fileUri } from '@kit.CoreFileKit';
 import { BrowserTab, Bookmark, HistoryEntry, TabInfo, DialItem } from '../model/Models';
 import { ENGINES, SearchEngine } from '../common/SearchEngine';
 import { hostOf, resolveInput, isSecure, colorForHost } from '../common/UrlUtils';
@@ -151,7 +153,39 @@ struct Index {
         }
       }
       AiaStore.saveDownloads(this.downloads);
-      promptAction.showToast({ message: '下载完成' });
+      // 自动导出到公共 Download（Chrome 式）：DOWNLOAD 模式系统直接落盘文件管理
+      let doneIdx: number = -1;
+      for (let i = 0; i < this.downloads.length; i++) {
+        if (this.downloads[i].guid === item.getGuid()) {
+          doneIdx = i;
+          break;
+        }
+      }
+      if (doneIdx >= 0 && this.downloads[doneIdx].state === 'done') {
+        try {
+          const pickerInst = new picker.DocumentViewPicker();
+          const opt: picker.DocumentSaveOptions = {
+            newFileNames: [this.downloads[doneIdx].fileName],
+            pickerMode: picker.DocumentPickerMode.DOWNLOAD
+          };
+          const idx: number = doneIdx;
+          pickerInst.save(opt).then((newUris: Array<string>) => {
+            if (newUris.length > 0) {
+              this.downloads[idx].publicUri = newUris[0];
+              try {
+                fileIo.copyFileSync(this.downloads[idx].path, newUris[0]);
+              } catch (err) {
+                // 公共副本失败不影响沙箱原件
+              }
+              AiaStore.saveDownloads(this.downloads);
+            }
+          }).catch(() => {
+          });
+        } catch (err) {
+          // ignore
+        }
+      }
+      promptAction.showToast({ message: '下载完成，已保存到文件管理' });
     });
     this.downloadDelegate.onDownloadFailed((item: webview.WebDownloadItem) => {
       for (let i = 0; i < this.downloads.length; i++) {
@@ -615,6 +649,88 @@ struct Index {
     AiaStore.saveDownloads(this.downloads);
   }
 
+  /** 扩展名 -> MIME（打开文件用），未识别类型走通用二进制 */
+  private mimeOfExt(fileName: string): string {
+    const e: string = fileName.substring(fileName.lastIndexOf('.') + 1).toLowerCase();
+    if (e === 'pdf') { return 'application/pdf'; }
+    if (e === 'apk') { return 'application/vnd.android.package-archive'; }
+    if (e === 'zip' || e === 'rar' || e === '7z') { return 'application/zip'; }
+    if (e === 'png') { return 'image/png'; }
+    if (e === 'jpg' || e === 'jpeg') { return 'image/jpeg'; }
+    if (e === 'mp3') { return 'audio/mpeg'; }
+    if (e === 'mp4') { return 'video/mp4'; }
+    if (e === 'txt' || e === 'csv') { return 'text/plain'; }
+    if (e === 'doc' || e === 'docx') { return 'application/msword'; }
+    if (e === 'xls' || e === 'xlsx') { return 'application/vnd.ms-excel'; }
+    return 'application/octet-stream';
+  }
+
+  /** 用系统「打开方式」打开已下载文件（带临时读授权） */
+  private openDownload(guid: string): void {
+    for (let i = 0; i < this.downloads.length; i++) {
+      if (this.downloads[i].guid === guid) {
+        const d = this.downloads[i];
+        if (d.path.length === 0) {
+          return;
+        }
+        try {
+          const ctx = getContext(this) as common.UIAbilityContext;
+          const want: Want = {
+            uri: fileUri.getUriFromPath(d.path),
+            type: this.mimeOfExt(d.fileName),
+            action: 'ohos.want.action.viewData',
+            flags: wantConstant.Flags.FLAG_AUTH_READ_URI_PERMISSION
+          };
+          ctx.startAbility(want).catch(() => {
+            promptAction.showToast({ message: '没有可打开此文件的应用' });
+          });
+        } catch (err) {
+          promptAction.showToast({ message: '打开失败' });
+        }
+        return;
+      }
+    }
+  }
+
+  /** 手动导出：保存到文件管理 Download（DOWNLOAD 模式无交互） */
+  private exportDownload(guid: string): void {
+    for (let i = 0; i < this.downloads.length; i++) {
+      if (this.downloads[i].guid === guid && this.downloads[i].state === 'done') {
+        const d = this.downloads[i];
+        if (d.publicUri.length > 0) {
+          promptAction.showToast({ message: '已保存在文件管理 Download 内' });
+          return;
+        }
+        try {
+          const pickerInst = new picker.DocumentViewPicker();
+          const opt: picker.DocumentSaveOptions = {
+            newFileNames: [d.fileName],
+            pickerMode: picker.DocumentPickerMode.DOWNLOAD
+          };
+          pickerInst.save(opt).then((newUris: Array<string>) => {
+            if (newUris.length > 0) {
+              d.publicUri = newUris[0];
+              try {
+                fileIo.copyFileSync(d.path, newUris[0]);
+                promptAction.showToast({ message: '已导出到文件管理 Download' });
+              } catch (err) {
+                promptAction.showToast({ message: '复制文件失败' });
+              }
+              AiaStore.saveDownloads(this.downloads);
+            } else {
+              promptAction.showToast({ message: '导出取消' });
+            }
+          }).catch((e: BusinessError) => {
+            promptAction.showToast({ message: '导出失败 code=' + e.code });
+          });
+        } catch (err) {
+          // ignore
+        }
+        return;
+      }
+    }
+  }
+
   /** 清空下载记录，可选是否删除真实文件；进行中的任务先取消 */
   private clearDownloads(): void {
     if (this.downloads.length === 0) {
@@ -648,6 +764,13 @@ struct Index {
             fileIo.unlinkSync(d.path);
           } catch (err) {
             // 文件可能已被移动或删除
+          }
+        }
+        if (delFiles && d.publicUri.length > 0) {
+          try {
+            fileIo.unlinkSync(d.publicUri);
+          } catch (err) {
+            // 公共副本删除失败不影响记录
           }
         }
       }
@@ -1040,6 +1163,8 @@ struct Index {
           onPauseResume: (guid: string, toPause: boolean) => this.pauseResumeDownload(guid, toPause),
           onCancel: (guid: string) => this.cancelDownload(guid),
           onDelete: (guid: string) => this.deleteDownload(guid),
+          onOpen: (guid: string) => this.openDownload(guid),
+          onExport: (guid: string) => this.exportDownload(guid),
           onClearAll: () => this.clearDownloads(),
           onClose: () => {
             this.downloadsVisible = false;

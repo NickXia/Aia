@@ -106,6 +106,8 @@ export class DownloadItem {
   speed: number;
   state: string;
   time: number;
+  /** 下载完成后导出到公共 Download 的 uri（文件管理可见） */
+  publicUri: string = '';
 
   constructor(guid: string, url: string, fileName: string, path: string) {
     this.guid = guid;
