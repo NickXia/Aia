@@ -67,6 +67,7 @@ struct Index {
   @State downloadsVisible: boolean = false;
   @State desktopUA: boolean = AiaStore.desktopUA;
   @State debugH5: boolean = AiaStore.debugH5;
+  @State downloadAskMode: boolean = AiaStore.downloadAskMode;
   private downloadDelegate: webview.WebDownloadDelegate = new webview.WebDownloadDelegate();
   // delegate 本体在 Index 管理（状态/持久化都在这），WebPane 创建内核时
   // 通过 AppStorage 取到并 controller.setDownloadDelegate 注册——
@@ -92,6 +93,7 @@ struct Index {
     // 阅读模式（羊皮卷主题）
     this.desktopUA = AiaStore.desktopUA;
     this.debugH5 = AiaStore.debugH5;
+    this.downloadAskMode = AiaStore.downloadAskMode;
     this.readingTheme = AiaStore.readingTheme;
     if (this.readingTheme) {
       setThemeMode('parchment');
@@ -119,6 +121,31 @@ struct Index {
       AiaStore.saveDownloads(this.downloads);
       item.start(path);
       promptAction.showToast({ message: '开始下载：' + name });
+      // 首次下载：询问用户偏好的保存位置（仅一次）
+      if (!AiaStore.downloadAsked) {
+        AiaStore.downloadAsked = true;
+        this.getUIContext().showAlertDialog({
+          title: '下载位置',
+          message: '文件默认保存在应用目录（可在下载管理中打开/导出）。是否改为每次下载时选择保存位置，便于自己查找？',
+          autoCancel: true,
+          alignment: DialogAlignment.Center,
+          primaryButton: {
+            value: '应用目录（推荐）',
+            fontColor: C('accent'),
+            action: () => {
+              AiaStore.downloadAskMode = false;
+            }
+          },
+          secondaryButton: {
+            value: '每次下载时询问',
+            fontColor: '#B4552E',
+            action: () => {
+              AiaStore.downloadAskMode = true;
+              promptAction.showToast({ message: '已开启：每次下载完成后可选择保存位置' });
+            }
+          }
+        });
+      }
     });
     this.downloadDelegate.onDownloadUpdated((item: webview.WebDownloadItem) => {
       for (let i = 0; i < this.downloads.length; i++) {
@@ -161,29 +188,70 @@ struct Index {
           break;
         }
       }
-      if (doneIdx >= 0 && this.downloads[doneIdx].state === 'done') {
+      if (doneIdx < 0) {
+        return;
+      }
+      if (AiaStore.downloadAskMode) {
+        // 用户自定义模式：弹出系统保存对话框，可浏览/新建目录选择保存位置
+        const idx: number = doneIdx;
         try {
           const pickerInst = new picker.DocumentViewPicker();
           const opt: picker.DocumentSaveOptions = {
-            newFileNames: [this.downloads[doneIdx].fileName],
-            pickerMode: picker.DocumentPickerMode.DOWNLOAD
+            newFileNames: [this.downloads[idx].fileName]
           };
-          const idx: number = doneIdx;
           pickerInst.save(opt).then((newUris: Array<string>) => {
             if (newUris.length > 0) {
               this.downloads[idx].publicUri = newUris[0];
               try {
                 fileIo.copyFileSync(this.downloads[idx].path, newUris[0]);
+                try {
+                  fileIo.unlinkSync(this.downloads[idx].path); // 已移到用户选的位置
+                } catch (err) {
+                  // ignore
+                }
+                this.downloads[idx].path = newUris[0];
+                promptAction.showToast({ message: '已保存到你选择的位置' });
               } catch (err) {
-                // 公共副本失败不影响沙箱原件
+                promptAction.showToast({ message: '保存失败，文件保留在应用目录' });
               }
               AiaStore.saveDownloads(this.downloads);
             }
           }).catch(() => {
+            promptAction.showToast({ message: '文件保留在应用目录，可稍后在下载管理导出' });
           });
         } catch (err) {
           // ignore
         }
+        return;
+      }
+      // 应用目录模式：自动导出公共 Download（Chrome 式）
+      try {
+        const pickerInst = new picker.DocumentViewPicker();
+        const opt: picker.DocumentSaveOptions = {
+          newFileNames: [this.downloads[doneIdx].fileName],
+          pickerMode: picker.DocumentPickerMode.DOWNLOAD
+        };
+        const idx2: number = doneIdx;
+        pickerInst.save(opt).then((newUris: Array<string>) => {
+          if (newUris.length > 0) {
+            this.downloads[idx2].publicUri = newUris[0];
+            try {
+              fileIo.copyFileSync(this.downloads[idx2].path, newUris[0]);
+              try {
+                fileIo.unlinkSync(this.downloads[idx2].path); // 已移到 Download，不留双份
+              } catch (err) {
+                // ignore
+              }
+              this.downloads[idx2].path = newUris[0];
+            } catch (err) {
+              // 移动失败保留沙箱原件，文件至少在 Download 有一份
+            }
+            AiaStore.saveDownloads(this.downloads);
+          }
+        }).catch(() => {
+        });
+      } catch (err) {
+        // ignore
       }
       promptAction.showToast({ message: '下载完成，已保存到文件管理' });
     });
@@ -692,93 +760,61 @@ struct Index {
     }
   }
 
-  /** 手动导出：保存到文件管理 Download（DOWNLOAD 模式无交互） */
-  private exportDownload(guid: string): void {
-    for (let i = 0; i < this.downloads.length; i++) {
-      if (this.downloads[i].guid === guid && this.downloads[i].state === 'done') {
-        const d = this.downloads[i];
-        if (d.publicUri.length > 0) {
-          promptAction.showToast({ message: '已保存在文件管理 Download 内' });
-          return;
-        }
-        try {
-          const pickerInst = new picker.DocumentViewPicker();
-          const opt: picker.DocumentSaveOptions = {
-            newFileNames: [d.fileName],
-            pickerMode: picker.DocumentPickerMode.DOWNLOAD
-          };
-          pickerInst.save(opt).then((newUris: Array<string>) => {
-            if (newUris.length > 0) {
-              d.publicUri = newUris[0];
-              try {
-                fileIo.copyFileSync(d.path, newUris[0]);
-                promptAction.showToast({ message: '已导出到文件管理 Download' });
-              } catch (err) {
-                promptAction.showToast({ message: '复制文件失败' });
-              }
-              AiaStore.saveDownloads(this.downloads);
-            } else {
-              promptAction.showToast({ message: '导出取消' });
-            }
-          }).catch((e: BusinessError) => {
-            promptAction.showToast({ message: '导出失败 code=' + e.code });
-          });
-        } catch (err) {
-          // ignore
-        }
-        return;
-      }
-    }
-  }
-
-  /** 清空下载记录，可选是否删除真实文件；进行中的任务先取消 */
+  /** 清空下载记录，可选是否删除真实文件（含公共副本）；进行中的任务先取消 */
   private clearDownloads(): void {
     if (this.downloads.length === 0) {
       return;
     }
-    const hasFile: number = this.downloads.filter((d: DownloadItem) => d.state === 'done').length;
-    promptAction.showDialog({
+    const doneCount: number = this.downloads.filter((d: DownloadItem) => d.state === 'done').length;
+    const snapshot: DownloadItem[] = this.downloads.slice();
+    this.getUIContext().showAlertDialog({
       title: '清空下载记录',
-      message: hasFile > 0
-        ? '是否同时删除已下载的 ' + hasFile + ' 个文件？删除后无法恢复。'
+      message: doneCount > 0
+        ? '是否同时删除已下载的 ' + doneCount + ' 个文件？删除后无法恢复。'
         : '将清空全部下载记录。',
-      buttons: [
-        { text: '取消', color: '#8A8270' },
-        { text: '仅清除记录', color: '#4D5464' },
-        { text: '清除并删除文件', color: '#B4552E' }
-      ]
-    }).then((result) => {
-      console.info('AiaDL clear dialog index=' + result.index);
-      // 按钮索引从 1 开始：1=取消 2=仅清除记录 3=清除并删除文件
-      if (result.index === 1) {
-        return;
-      }
-      const delFiles: boolean = result.index === 3;
-      for (let i = 0; i < this.downloads.length; i++) {
-        const d = this.downloads[i];
-        if (d.state === 'progressing' || d.state === 'paused') {
-          WebPendingAction.set(d.guid, 'cancel'); // 进行中的先取消
+      autoCancel: true,
+      alignment: DialogAlignment.Center,
+      primaryButton: {
+        value: '仅清除记录',
+        action: () => {
+          this.finishClearDownloads(snapshot, false);
         }
-        if (delFiles && d.path.length > 0) {
-          try {
-            fileIo.unlinkSync(d.path);
-          } catch (err) {
-            // 文件可能已被移动或删除
-          }
-        }
-        if (delFiles && d.publicUri.length > 0) {
-          try {
-            fileIo.unlinkSync(d.publicUri);
-          } catch (err) {
-            // 公共副本删除失败不影响记录
-          }
+      },
+      secondaryButton: {
+        value: '清除并删除文件',
+        fontColor: '#B4552E',
+        action: () => {
+          this.finishClearDownloads(snapshot, true);
         }
       }
-      this.downloads = [];
-      AiaStore.saveDownloads(this.downloads);
-      promptAction.showToast({ message: delFiles ? '已清空记录并删除文件' : '已清空下载记录' });
-    }).catch(() => {
     });
+  }
+
+  /** 执行清空：delFiles=true 时删除沙箱原件与公共副本 */
+  private finishClearDownloads(snapshot: DownloadItem[], delFiles: boolean): void {
+    for (let i = 0; i < snapshot.length; i++) {
+      const d = snapshot[i];
+      if (d.state === 'progressing' || d.state === 'paused') {
+        WebPendingAction.set(d.guid, 'cancel');
+      }
+      if (delFiles && d.path.length > 0) {
+        try {
+          fileIo.unlinkSync(d.path);
+        } catch (err) {
+          // 文件可能已被移动或删除
+        }
+      }
+      if (delFiles && d.publicUri.length > 0) {
+        try {
+          fileIo.unlinkSync(d.publicUri);
+        } catch (err) {
+          // 公共副本删除失败不影响记录
+        }
+      }
+    }
+    this.downloads = [];
+    AiaStore.saveDownloads(this.downloads);
+    promptAction.showToast({ message: delFiles ? '已清空记录并删除文件' : '已清空下载记录' });
   }
 
   private deleteDownload(guid: string): void {
@@ -1159,12 +1195,11 @@ struct Index {
 
       if (this.downloadsVisible) {
         DownloadsPanel({
-          downloads: this.downloads,
+          downloads: $downloads,
           onPauseResume: (guid: string, toPause: boolean) => this.pauseResumeDownload(guid, toPause),
           onCancel: (guid: string) => this.cancelDownload(guid),
           onDelete: (guid: string) => this.deleteDownload(guid),
           onOpen: (guid: string) => this.openDownload(guid),
-          onExport: (guid: string) => this.exportDownload(guid),
           onClearAll: () => this.clearDownloads(),
           onClose: () => {
             this.downloadsVisible = false;
@@ -1245,6 +1280,7 @@ struct Index {
           dnt: this.dnt,
           desktopUA: this.desktopUA,
           debugH5: this.debugH5,
+          downloadAskMode: this.downloadAskMode,
           bgPath: this.bgImage,
           elderMode: this.elderMode,
           readingTheme: this.readingTheme,
@@ -1265,6 +1301,10 @@ struct Index {
               this.desktopUA = value;
               AiaStore.desktopUA = value;
               promptAction.showToast({ message: value ? '已切换桌面版网页' : '已恢复手机版网页' });
+            } else if (key === 'askMode') {
+              this.downloadAskMode = value;
+              AiaStore.downloadAskMode = value;
+              promptAction.showToast({ message: value ? '下载完成后将询问保存位置' : '下载保存到应用目录' });
             } else if (key === 'debugH5') {
               this.debugH5 = value;
               AiaStore.debugH5 = value;

@@ -10,7 +10,8 @@ import { C } from '../common/AiaTheme';
  */
 @Component
 export struct DownloadsPanel {
-  @State downloads: DownloadItem[] = [];
+  /** 双向绑定 Index 的下载数组：清空/进度更新实时同步 */
+  @Link downloads: DownloadItem[];
   onPauseResume: (guid: string, toPause: boolean) => void = () => {
   };
   onCancel: (guid: string) => void = () => {
@@ -18,8 +19,6 @@ export struct DownloadsPanel {
   onDelete: (guid: string) => void = () => {
   };
   onOpen: (guid: string) => void = () => {
-  };
-  onExport: (guid: string) => void = () => {
   };
   onClearAll: () => void = () => {
   };
@@ -93,8 +92,7 @@ export struct DownloadsPanel {
                   onPauseResume: (guid: string, toPause: boolean) => this.onPauseResume(guid, toPause),
                   onCancel: (guid: string) => this.onCancel(guid),
                   onDelete: (guid: string) => this.onDelete(guid),
-                  onOpen: (guid: string) => this.onOpen(guid),
-                  onExport: (guid: string) => this.onExport(guid)
+                  onOpen: (guid: string) => this.onOpen(guid)
                 })
               }
             }, (item: DownloadItem) => item.guid)

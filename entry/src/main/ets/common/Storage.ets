@@ -33,6 +33,8 @@ const KEY_READING: string = 'reading_theme';
 const KEY_DOWNLOADS: string = 'downloads';
 const KEY_DESKTOP_UA: string = 'desktop_ua';
 const KEY_DEBUG_H5: string = 'debug_h5';
+const KEY_ASK_MODE: string = 'download_ask_mode';
+const KEY_ASKED: string = 'download_asked';
 
 /**
  * 轻量本地存储。全部走 Preferences，读写都是同步的（数据量很小）。
@@ -290,6 +292,24 @@ export class AiaStore {
       raw.push(o);
     }
     AiaStore.put(KEY_DOWNLOADS, JSON.stringify(raw));
+  }
+
+  /** 下载位置模式：false=应用目录（推荐，自动导出 Download）；true=每次下载时询问保存位置 */
+  static get downloadAskMode(): boolean {
+    return AiaStore.getBool(KEY_ASK_MODE, false);
+  }
+
+  static set downloadAskMode(v: boolean) {
+    AiaStore.put(KEY_ASK_MODE, v);
+  }
+
+  /** 是否已经向用户询问过首次下载位置 */
+  static get downloadAsked(): boolean {
+    return AiaStore.getBool(KEY_ASKED, false);
+  }
+
+  static set downloadAsked(v: boolean) {
+    AiaStore.put(KEY_ASKED, v);
   }
 
   /** H5 远程调试开关（chrome://inspect 调试内核页面） */

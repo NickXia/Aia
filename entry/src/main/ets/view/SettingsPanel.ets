@@ -20,6 +20,7 @@ export struct SettingsPanel {
   @Prop readingTheme: boolean;
   @Prop desktopUA: boolean;
   @Prop debugH5: boolean;
+  @Prop downloadAskMode: boolean;
 
   onToggle: (key: string, value: boolean) => void = () => {
   };
@@ -250,6 +251,39 @@ export struct SettingsPanel {
             .padding({ left: 14, right: 14 })
             .borderRadius(14)
             .backgroundColor($r('app.color.surface_alt'))
+
+            // 下载
+            this.sectionTitle('下载');
+            Column() {
+              Row({ space: 12 }) {
+                Column({ space: 2 }) {
+                  Text('下载位置')
+                    .fontSize(ZFont.body)
+                    .fontColor(C('text_primary'))
+                    .width('100%')
+                    .textAlign(TextAlign.Start)
+                  Text(this.downloadAskMode ? '每次下载完成后选择保存位置' : '应用目录（自动导出到文件管理）')
+                    .fontSize(Math.round(10 * getUiScale()))
+                    .fontColor(C('text_tertiary'))
+                    .width('100%')
+                    .textAlign(TextAlign.Start)
+                }
+                .layoutWeight(1)
+                .alignItems(HorizontalAlign.Start)
+
+                Toggle({ type: ToggleType.Switch, isOn: this.downloadAskMode })
+                  .selectedColor(C('accent'))
+                  .width(44)
+                  .height(26)
+                  .onChange((isOn: boolean) => this.onToggle('askMode', isOn))
+              }
+              .width('100%')
+              .padding({ top: 11, bottom: 11 })
+            }
+            .width('100%')
+            .padding({ left: 14, right: 14 })
+            .borderRadius(ZRadius.card)
+            .backgroundColor(C('surface_alt'))
 
             // 搜索
             this.sectionTitle('搜索');
