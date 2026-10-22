@@ -19,6 +19,7 @@ export struct SettingsPanel {
   @Prop elderMode: boolean;
   @Prop readingTheme: boolean;
   @Prop desktopUA: boolean;
+  @Prop debugH5: boolean;
 
   onToggle: (key: string, value: boolean) => void = () => {
   };
@@ -281,7 +282,25 @@ export struct SettingsPanel {
               this.switchRow('阻止图片加载', '省流量，弱网下更快', this.blockImages, 'blockImages', false)
               this.switchRow('保存浏览记录', '', this.saveHistory, 'saveHistory', false)
               this.switchRow('允许 JavaScript', '关闭后部分网页无法正常显示', this.jsEnabled, 'js', false)
-              this.switchRow('桌面版网页', '以电脑版方式浏览网页', this.desktopUA, 'desktopUA', true)
+              this.switchRow('桌面版网页', '以电脑版方式浏览网页', this.desktopUA, 'desktopUA', false)
+            this.switchRow('H5 远程调试', '开启后可用 PC Chrome 调试网页（见下方说明）', this.debugH5, 'debugH5', true)
+
+            if (this.debugH5) {
+              Column({ space: 4 }) {
+                Text('调试方法：')
+                  .fontSize(Math.round(10 * getUiScale()))
+                  .fontColor(C('text_secondary'))
+                  .width('100%')
+                  .textAlign(TextAlign.Start)
+                Text('1. 电脑连接手机后执行：hdc fport tcp:9222 tcp:9222\n2. 电脑 Chrome 打开 chrome://inspect\n3. 在列表中点击页面下的 inspect 即可调试')
+                  .fontSize(Math.round(10 * getUiScale()))
+                  .fontColor(C('text_tertiary'))
+                  .width('100%')
+                  .textAlign(TextAlign.Start)
+              }
+              .width('100%')
+              .padding({ top: 8, bottom: 10 })
+            }
             }
             .width('100%')
             .padding({ left: 14, right: 14 })

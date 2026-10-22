@@ -64,6 +64,7 @@ struct Index {
   @State downloads: DownloadItem[] = AiaStore.loadDownloads();
   @State downloadsVisible: boolean = false;
   @State desktopUA: boolean = AiaStore.desktopUA;
+  @State debugH5: boolean = AiaStore.debugH5;
   private downloadDelegate: webview.WebDownloadDelegate = new webview.WebDownloadDelegate();
   // delegate 本体在 Index 管理（状态/持久化都在这），WebPane 创建内核时
   // 通过 AppStorage 取到并 controller.setDownloadDelegate 注册——
@@ -88,6 +89,7 @@ struct Index {
     }
     // 阅读模式（羊皮卷主题）
     this.desktopUA = AiaStore.desktopUA;
+    this.debugH5 = AiaStore.debugH5;
     this.readingTheme = AiaStore.readingTheme;
     if (this.readingTheme) {
       setThemeMode('parchment');
@@ -669,7 +671,7 @@ struct Index {
 
   /** 危险操作二次确认：确认后执行 confirm()，取消不动作 */
   private confirmThen(title: string, message: string, confirm: () => void): void {
-    AlertDialog.show({
+    this.getUIContext().showAlertDialog({
       title: title,
       message: message,
       autoCancel: true,
@@ -1117,6 +1119,7 @@ struct Index {
           jsEnabled: this.jsEnabled,
           dnt: this.dnt,
           desktopUA: this.desktopUA,
+          debugH5: this.debugH5,
           bgPath: this.bgImage,
           elderMode: this.elderMode,
           readingTheme: this.readingTheme,
@@ -1137,6 +1140,23 @@ struct Index {
               this.desktopUA = value;
               AiaStore.desktopUA = value;
               promptAction.showToast({ message: value ? '已切换桌面版网页' : '已恢复手机版网页' });
+            } else if (key === 'debugH5') {
+              this.debugH5 = value;
+              AiaStore.debugH5 = value;
+              try {
+                if (value) {
+                  try {
+                    webview.WebviewController.setWebDebuggingAccess(true, 9222);
+                  } catch (e1) {
+                    webview.WebviewController.setWebDebuggingAccess(true);
+                  }
+                  promptAction.showToast({ message: '调试已开启，按设置页说明连接 Chrome' });
+                } else {
+                  webview.WebviewController.setWebDebuggingAccess(false);
+                }
+              } catch (err) {
+                promptAction.showToast({ message: '开关失败，重启应用后生效' });
+              }
             } else if (key === 'elderMode') {
               // 关怀模式：切换缩放因子并整树重建 UI
               this.elderMode = value;

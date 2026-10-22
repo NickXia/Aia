@@ -32,6 +32,7 @@ const KEY_ELDER: string = 'elder_mode';
 const KEY_READING: string = 'reading_theme';
 const KEY_DOWNLOADS: string = 'downloads';
 const KEY_DESKTOP_UA: string = 'desktop_ua';
+const KEY_DEBUG_H5: string = 'debug_h5';
 
 /**
  * 轻量本地存储。全部走 Preferences，读写都是同步的（数据量很小）。
@@ -289,6 +290,15 @@ export class AiaStore {
       raw.push(o);
     }
     AiaStore.put(KEY_DOWNLOADS, JSON.stringify(raw));
+  }
+
+  /** H5 远程调试开关（chrome://inspect 调试内核页面） */
+  static get debugH5(): boolean {
+    return AiaStore.getBool(KEY_DEBUG_H5, false);
+  }
+
+  static set debugH5(v: boolean) {
+    AiaStore.put(KEY_DEBUG_H5, v);
   }
 
   static get desktopUA(): boolean {
