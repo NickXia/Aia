@@ -17,6 +17,8 @@ export struct DownloadsPanel {
   };
   onDelete: (guid: string) => void = () => {
   };
+  onClearAll: () => void = () => {
+  };
   onClose: () => void = () => {
   };
 
@@ -47,6 +49,14 @@ export struct DownloadsPanel {
             .fontColor(C('text_primary'))
 
           Blank()
+
+          if (this.downloads.length > 0) {
+            Text('清空')
+              .fontSize(ZFont.footnote)
+              .fontColor(C('danger'))
+              .padding({ left: 8, right: 8, top: 6, bottom: 6 })
+              .onClick(() => this.onClearAll())
+          }
 
           Text('完成')
             .fontSize(ZFont.body)

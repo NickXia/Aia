@@ -613,6 +613,49 @@ struct Index {
     AiaStore.saveDownloads(this.downloads);
   }
 
+  /** 清空下载记录，可选是否删除真实文件；进行中的任务先取消 */
+  private clearDownloads(): void {
+    if (this.downloads.length === 0) {
+      return;
+    }
+    const hasFile: number = this.downloads.filter((d: DownloadItem) => d.state === 'done').length;
+    promptAction.showDialog({
+      title: '清空下载记录',
+      message: hasFile > 0
+        ? '是否同时删除已下载的 ' + hasFile + ' 个文件？删除后无法恢复。'
+        : '将清空全部下载记录。',
+      buttons: [
+        { text: '取消', color: '#8A8270' },
+        { text: '仅清除记录', color: '#4D5464' },
+        { text: '清除并删除文件', color: '#B4552E' }
+      ]
+    }).then((result) => {
+      console.info('AiaDL clear dialog index=' + result.index);
+      // 按钮索引从 1 开始：1=取消 2=仅清除记录 3=清除并删除文件
+      if (result.index === 1) {
+        return;
+      }
+      const delFiles: boolean = result.index === 3;
+      for (let i = 0; i < this.downloads.length; i++) {
+        const d = this.downloads[i];
+        if (d.state === 'progressing' || d.state === 'paused') {
+          WebPendingAction.set(d.guid, 'cancel'); // 进行中的先取消
+        }
+        if (delFiles && d.path.length > 0) {
+          try {
+            fileIo.unlinkSync(d.path);
+          } catch (err) {
+            // 文件可能已被移动或删除
+          }
+        }
+      }
+      this.downloads = [];
+      AiaStore.saveDownloads(this.downloads);
+      promptAction.showToast({ message: delFiles ? '已清空记录并删除文件' : '已清空下载记录' });
+    }).catch(() => {
+    });
+  }
+
   private deleteDownload(guid: string): void {
     const rest: DownloadItem[] = [];
     for (let i = 0; i < this.downloads.length; i++) {
@@ -626,19 +669,24 @@ struct Index {
 
   /** 危险操作二次确认：确认后执行 confirm()，取消不动作 */
   private confirmThen(title: string, message: string, confirm: () => void): void {
-    const dialog = promptAction.showDialog({
+    AlertDialog.show({
       title: title,
       message: message,
-      buttons: [
-        { text: '取消', color: '#8A8270' },
-        { text: '确定', color: '#B4552E' }
-      ]
-    });
-    dialog.then((result) => {
-      if (result.index === 1) {
-        confirm();
+      autoCancel: true,
+      alignment: DialogAlignment.Center,
+      primaryButton: {
+        value: '取消',
+        fontColor: C('text_secondary'),
+        action: () => {
+        }
+      },
+      secondaryButton: {
+        value: '确定',
+        fontColor: '#B4552E',
+        action: () => {
+          confirm();
+        }
       }
-    }).catch(() => {
     });
   }
 
@@ -990,6 +1038,7 @@ struct Index {
           onPauseResume: (guid: string, toPause: boolean) => this.pauseResumeDownload(guid, toPause),
           onCancel: (guid: string) => this.cancelDownload(guid),
           onDelete: (guid: string) => this.deleteDownload(guid),
+          onClearAll: () => this.clearDownloads(),
           onClose: () => {
             this.downloadsVisible = false;
           }
