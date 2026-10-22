@@ -13,3 +13,4 @@ certs/
 *.p12
 *.cer
 *.p7b
+*.app

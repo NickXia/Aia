@@ -65,6 +65,9 @@ struct Index {
   @State downloadsVisible: boolean = false;
   @State desktopUA: boolean = AiaStore.desktopUA;
   private downloadDelegate: webview.WebDownloadDelegate = new webview.WebDownloadDelegate();
+  // delegate 本体在 Index 管理（状态/持久化都在这），WebPane 创建内核时
+  // 通过 AppStorage 取到并 controller.setDownloadDelegate 注册——
+  // 此前漏了注册这一步，网页下载事件无人接收
 
   private seq: number = 0;
 
@@ -90,6 +93,8 @@ struct Index {
       setThemeMode('parchment');
     }
     // 下载委托：全局注册一次，网页触发的下载统一走这里
+    // delegate 通过 AppStorage 共享给各 WebPane（内核创建时 setDownloadDelegate 注册）
+    AppStorage.setOrCreate<webview.WebDownloadDelegate>('downloadDelegate', this.downloadDelegate);
     this.downloadDelegate.onBeforeDownload((item: webview.WebDownloadItem) => {
       const url: string = item.getUrl();
       let name: string = url.substring(url.lastIndexOf('/') + 1).split('?')[0];
@@ -109,6 +114,7 @@ struct Index {
       this.downloads = AiaStore.trimDownloads(list);
       AiaStore.saveDownloads(this.downloads);
       item.start(path);
+      promptAction.showToast({ message: '开始下载：' + name });
     });
     this.downloadDelegate.onDownloadUpdated((item: webview.WebDownloadItem) => {
       for (let i = 0; i < this.downloads.length; i++) {

@@ -1,4 +1,5 @@
 import { webview } from '@kit.ArkWeb';
+import { common, Want, bundleManager } from '@kit.AbilityKit';
 import { BrowserTab } from '../model/Models';
 
 /**
@@ -88,6 +89,15 @@ export struct WebPane {
       .onControllerAttached(() => {
         this.tab.controller = this.controller;
         try {
+          // 注册下载委托：网页触发的下载统一交给 Index 管理的 delegate
+          const delegate = AppStorage.get<webview.WebDownloadDelegate>('downloadDelegate');
+          if (delegate !== undefined) {
+            this.controller.setDownloadDelegate(delegate);
+          }
+        } catch (err) {
+          // ignore
+        }
+        try {
           this.controller.setCustomUserAgent(this.desktopUA
             ? 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36'
             : '');
@@ -97,6 +107,31 @@ export struct WebPane {
         if (this.tab.url.length > 0) {
           this.controller.loadUrl(this.tab.url);
         }
+      })
+      .onLoadIntercept((event: OnLoadInterceptEvent) => {
+        // 自定义 scheme（zhihu:// bilibili:// taobao:// 等）＝「打开 App」按钮：
+        // 先用 canOpenLink 判断设备上是否有应用能打开，有则 startAbility 唤起；
+        // 没有则静默拦截留在网页——避免 startAbility 失败弹出系统
+        // 「暂无可用打开方式」提示打扰用户
+        const url: string = event.data.getRequestUrl();
+        const lower: string = url.toLowerCase();
+        const isWeb: boolean = lower.startsWith('http://') || lower.startsWith('https://')
+          || lower.startsWith('about:') || lower.startsWith('data:')
+          || lower.startsWith('blob:') || lower.startsWith('javascript:');
+        if (isWeb) {
+          return false;
+        }
+        // 自定义 scheme 唤起：openLink 由系统统一处理「有 App 就唤起 /
+        // 没 App 留在原地」，不会弹「暂无可用打开方式」
+        try {
+          const ctx = getContext(this) as common.UIAbilityContext;
+          ctx.openLink(url, { appLinkingOnly: false }).catch(() => {
+            // 无匹配应用：静默留在网页
+          });
+        } catch (err) {
+          // ignore
+        }
+        return true;
       })
       .onPageBegin(() => {
         // 占位页（about:blank）的 pageBegin 不改任何状态——
@@ -188,7 +223,20 @@ export struct WebPane {
       })
       // 报错页（登录墙、断网等）不会触发 onPageEnd，必须在这里结束加载状态，
       // 否则进度条会永远卡住
-      .onErrorReceive(() => {
+      .onErrorReceive((event?: OnErrorReceiveEvent) => {
+        // 被拦截的自定义 scheme（深链）内核会报加载错误——这不是网页失败，
+        // 忽略之，避免「打开 App」场景误弹错误卡
+        try {
+          const errUrl: string = event !== undefined ? event.request.getRequestUrl() : '';
+          const errLower: string = errUrl.toLowerCase();
+          if (errUrl.length > 0 && !errLower.startsWith('http://') && !errLower.startsWith('https://')
+            && !errLower.startsWith('about:') && !errLower.startsWith('data:')
+            && !errLower.startsWith('blob:')) {
+            return;
+          }
+        } catch (err) {
+          // ignore
+        }
         this.tab.loadError = true;
         this.tab.isLoading = false;
         this.tab.progress = 100;
