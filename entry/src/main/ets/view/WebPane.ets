@@ -101,7 +101,11 @@ export struct WebPane {
       // 内核会初始化失败（browser is null），导致导航随机挂起
       // incognitoMode：内核级无痕——Cookie/缓存/localStorage 走内存态，
       // 标签销毁即丢弃，与普通标签完全隔离（关闭无痕标签后无需登录态残留）
-      Web({ src: 'about:blank', controller: this.controller, incognitoMode: this.tab.incognito })
+      // src 直接带目标 URL（新标签携带预置链接，如外部「用 Aia 打开」）：
+      // 走内核正规初始化加载。绝不能在 onControllerAttached 里立即 loadUrl——
+      // 实测 attach 同帧导航内核加载完成后首帧合成会丢失（DOM 完整但
+      // surface 空白，任何一次 visibility 切换才恢复），src 参数无此问题
+      Web({ src: this.tab.url.length > 0 ? this.tab.url : 'about:blank', controller: this.controller, incognitoMode: this.tab.incognito })
       .width('100%')
       .height('100%')
       .backgroundColor(Color.Transparent)
@@ -117,6 +121,7 @@ export struct WebPane {
       .verticalScrollBarAccess(false)
       .onControllerAttached(() => {
         this.tab.controller = this.controller;
+        this.tab.attachedAt = Date.now();
         try {
           // 注册下载委托：网页触发的下载统一交给 Index 管理的 delegate（构造时传入）
           if (this.downloadDelegate !== null) {
@@ -135,14 +140,9 @@ export struct WebPane {
         } catch (err) {
           // ignore
         }
-        if (this.tab.url.length > 0) {
-          console.info('AiaWeb attach load ' + this.tab.url);
-          try {
-            this.controller.loadUrl(this.tab.url);
-          } catch (err) {
-            console.info('AiaWeb attach loadUrl FAIL ' + (err as Error).message);
-          }
-        }
+        // 注意：此处绝不 loadUrl——新标签的预置 URL 已由 src 构造参数加载
+        // （attach 同帧 loadUrl 会导致首帧合成丢失，见 build 内注释）；
+        // 已存在标签的导航由 Index.navigate() 的 controller.loadUrl 负责
       })
       .onLoadIntercept((event: OnLoadInterceptEvent) => {
         // 深链决策逻辑已抽为纯函数 decideDeepLink（ADR-1，白名单+手势门槛+冷却，

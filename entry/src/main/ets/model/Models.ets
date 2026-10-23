@@ -32,6 +32,9 @@ export class BrowserTab {
   loadFailed: boolean = false;
   /** 无痕标签：不写历史记录；地址栏/标签卡有标识 */
   incognito: boolean = false;
+  /** Web 内核 attach 完成时刻：navigate 首次 loadUrl 需距此 600ms 以上，
+   *  否则首帧合成丢失（DOM 完整但 surface 空白，实测 attach 同帧导航必现） */
+  attachedAt: number = 0;
   controller: webview.WebviewController | null = null;
 
   constructor(id: string) {

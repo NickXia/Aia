@@ -59,6 +59,10 @@ struct Index {
   @State readingTheme: boolean = false;
   /** 系统深浅色变化时递增（EntryAbility 写入），驱动整树重建取新色 */
   @StorageLink('themeEpoch') themeEpoch: number = 0;
+  /** 外部应用「用 Aia 打开」的链接：EntryAbility 冷启/温启都写入此键，
+   *  Index 用 @Watch 双路消费——只靠 aboutToAppear 读一次的话，应用已
+   *  在后台运行时（默认浏览器场景常态）温启动的链接会被静默吞掉 */
+  @StorageLink('launchUrl') @Watch('onLaunchUrl') launchUrl: string = '';
   @State downloads: DownloadItem[] = AiaStore.loadDownloads();
   @State downloadsVisible: boolean = false;
   @State desktopUA: boolean = AiaStore.desktopUA;
@@ -480,17 +484,44 @@ struct Index {
       AiaStore.saveHistoryList(kept);
     }
 
-    const pending: string = AppStorage.get<string>('launchUrl') ?? '';
     const first: BrowserTab = this.newTab();
     this.activeId = first.id;
     this.showHome = true;
-    if (pending.length > 0) {
-      AppStorage.set<string>('launchUrl', '');
-      // 等第一帧渲染完再加载，确保 Web 组件已挂载
-      setTimeout(() => {
-        this.navigate(pending);
-      }, 60);
+    // 冷启携带的外部链接（温启由 @Watch('onLaunchUrl') 消费）
+    this.consumeLaunchUrl();
+  }
+
+  /** 温启动入口：EntryAbility.onNewWant 写 launchUrl 后触发 */
+  private onLaunchUrl(): void {
+    this.consumeLaunchUrl();
+  }
+
+  /** 消费外部打开的链接（冷启 aboutToAppear + 温启 @Watch 双路入口） */
+  private consumeLaunchUrl(): void {
+    let pending: string = this.launchUrl;
+    if (pending.length === 0) {
+      return;
     }
+    // Want.uri 可能整体 URL 编码（%3A 冒号 / %2F 斜杠），先还原
+    if (pending.indexOf('%3A') >= 0 || pending.indexOf('%3a') >= 0
+      || pending.indexOf('%2F') >= 0 || pending.indexOf('%2f') >= 0) {
+      try {
+        pending = decodeURIComponent(pending);
+      } catch (err) {
+        // 编码不完整（用户输入含孤立 %）：保留原文
+      }
+    }
+    this.launchUrl = ''; // 清 key 防重复消费（赋空会再触发一次 watch，早退无害）
+    // 等第一帧渲染完再加载，确保 Web 组件已挂载（冷启场景）
+    setTimeout(() => {
+      const tab: BrowserTab = this.activeTab();
+      if (tab.url.length === 0 && !tab.isLoading) {
+        this.navigate(pending);
+      } else {
+        // 用户正在浏览：外部链接开新标签，不打断当前页
+        this.openInNewTab(pending, tab.incognito);
+      }
+    }, 60);
   }
 
   /** 空白页看门狗：非主页状态下停留在占位页且无加载活动 → 自愈回主页 */
@@ -745,15 +776,28 @@ struct Index {
     tab.progress = 0;
     tab.isLoading = true;
     AppStorage.setOrCreate<number>('loadingPct', 0);
-    if (tab.controller !== null) {
+    const ctrl: webview.WebviewController | null = tab.controller;
+    if (ctrl === null) {
+      console.error('AiaNav controller is null');
+      return;
+    }
+    // attach 后 600ms 内的首次 loadUrl 会丢首帧合成（DOM 加载完成但
+    // surface 空白，直到下一次 visibility 切换才恢复）——冷启 launchUrl
+    // 60ms 即导航，必现。延迟到 attach+600ms 再发
+    const doLoad = (): void => {
       try {
-        tab.controller.loadUrl(target);
+        ctrl.loadUrl(target);
         console.info('AiaNav loadUrl ok');
       } catch (err) {
         console.error('AiaNav loadUrl FAILED: ' + JSON.stringify(err));
       }
+    };
+    const sinceAttach: number = tab.attachedAt > 0 ? Date.now() - tab.attachedAt : 60000;
+    if (sinceAttach < 600) {
+      setTimeout(doLoad, 600 - sinceAttach);
+      console.info('AiaNav loadUrl deferred ' + (600 - sinceAttach) + 'ms (attach fresh)');
     } else {
-      console.error('AiaNav controller is null');
+      doLoad();
     }
   }
 
