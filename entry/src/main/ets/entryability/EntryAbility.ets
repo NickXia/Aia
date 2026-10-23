@@ -1,9 +1,9 @@
-import { AbilityConstant, UIAbility, Want } from '@kit.AbilityKit';
+import { AbilityConstant, UIAbility, Want, ConfigurationConstant, Configuration } from '@kit.AbilityKit';
 import { hilog } from '@kit.PerformanceAnalysisKit';
 import { window } from '@kit.ArkUI';
 import { BusinessError } from '@kit.BasicServicesKit';
 import { AiaStore } from '../common/Storage';
-import { ConfigurationConstant, Configuration } from '@kit.AbilityKit';
+import { webview } from '@kit.ArkWeb';
 
 const TAG: string = 'Aia';
 const DOMAIN: number = 0x0001;
@@ -13,6 +13,19 @@ export default class EntryAbility extends UIAbility {
     AiaStore.init(this.context);
     const incoming: string = want.uri === undefined ? '' : want.uri;
     AppStorage.setOrCreate<string>('launchUrl', incoming);
+    // H5 远程调试：须在 Web 内核初始化前调用才生效。
+    // 固定 9222 端口（API20+），失败回退无端口版本（随机端口，用 fport ls 查）
+    try {
+      if (AiaStore.debugH5) {
+        try {
+          webview.WebviewController.setWebDebuggingAccess(true, 9222);
+        } catch (e1) {
+          webview.WebviewController.setWebDebuggingAccess(true);
+        }
+      }
+    } catch (err) {
+      hilog.error(DOMAIN, TAG, 'setWebDebuggingAccess failed');
+    }
     // 深浅色初值（阅读/普通主题的 C() 取色依赖此状态）
     try {
       const cfg = this.context.config;

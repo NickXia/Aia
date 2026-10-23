@@ -68,14 +68,17 @@ export struct BottomBar {
           Image($r('app.media.ic_tabs'))
             .width(ZSize.icon)
             .height(ZSize.icon)
-          Text(this.tabCount > 99 ? '99+' : String(this.tabCount))
-            .fontSize(9)
-            .fontWeight(FontWeight.Medium)
-            .fontColor(C('surface'))
-            .backgroundColor(C('text_primary'))
-            .borderRadius(7)
-            .padding({ left: 4, right: 4, top: 1, bottom: 1 })
-            .offset({ x: 8, y: -5 })
+          // 多于一个标签才显示数量角标：单标签显示"1"反而突兀
+          if (this.tabCount > 1) {
+            Text(this.tabCount > 99 ? '99+' : String(this.tabCount))
+              .fontSize(9)
+              .fontWeight(FontWeight.Medium)
+              .fontColor(C('surface'))
+              .backgroundColor(C('text_primary'))
+              .borderRadius(7)
+              .padding({ left: 4, right: 4, top: 1, bottom: 1 })
+              .offset({ x: 8, y: -5 })
+          }
         }
         .width(ZSize.iconButton)
         .height(ZSize.iconButton)

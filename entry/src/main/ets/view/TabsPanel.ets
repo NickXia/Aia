@@ -11,6 +11,7 @@ import { C } from '../common/AiaTheme';
 export struct TabsPanel {
   @Prop infos: TabInfo[];
   @Prop activeId: string;
+  @Prop topAvoid: number;
   onSelect: (id: string) => void = () => {
   };
   onCloseTab: (id: string) => void = () => {
@@ -136,6 +137,7 @@ export struct TabsPanel {
     }
     .width('100%')
     .height('100%')
+    .padding({ top: this.topAvoid })
     .backgroundColor(C('page_bg'))
     .transition(TransitionEffect.OPACITY.animation({ duration: 160 })
       .combine(TransitionEffect.scale({ x: 0.96, y: 0.96 }).animation({ duration: 200 })))

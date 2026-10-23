@@ -18,6 +18,9 @@ export struct SettingsPanel {
   @Prop bgPath: string;
   @Prop elderMode: boolean;
   @Prop readingTheme: boolean;
+  @Prop desktopUA: boolean;
+  @Prop debugH5: boolean;
+  @Prop downloadAskMode: boolean;
 
   onToggle: (key: string, value: boolean) => void = () => {
   };
@@ -223,12 +226,12 @@ export struct SettingsPanel {
                 Column({ space: 2 }) {
                   Text('阅读模式')
                     .fontSize(ZFont.body)
-                    .fontColor($r('app.color.text_primary'))
+                    .fontColor(C('text_primary'))
                     .width('100%')
                     .textAlign(TextAlign.Start)
                   Text(this.readingTheme ? '已启用羊皮卷配色' : '羊皮纸暖色配色，适合长时间阅读')
                     .fontSize(10)
-                    .fontColor(this.readingTheme ? $r('app.color.accent') : $r('app.color.text_tertiary'))
+                    .fontColor(this.readingTheme ? C('accent') : C('text_tertiary'))
                     .width('100%')
                     .textAlign(TextAlign.Start)
                 }
@@ -236,7 +239,7 @@ export struct SettingsPanel {
                 .alignItems(HorizontalAlign.Start)
 
                 Toggle({ type: ToggleType.Switch, isOn: this.readingTheme })
-                  .selectedColor($r('app.color.accent'))
+                  .selectedColor(C('accent'))
                   .width(44)
                   .height(26)
                   .onChange((isOn: boolean) => this.onToggle('readingTheme', isOn))
@@ -247,7 +250,40 @@ export struct SettingsPanel {
             .width('100%')
             .padding({ left: 14, right: 14 })
             .borderRadius(14)
-            .backgroundColor($r('app.color.surface_alt'))
+            .backgroundColor(C('surface_alt'))
+
+            // 下载
+            this.sectionTitle('下载');
+            Column() {
+              Row({ space: 12 }) {
+                Column({ space: 2 }) {
+                  Text('下载位置')
+                    .fontSize(ZFont.body)
+                    .fontColor(C('text_primary'))
+                    .width('100%')
+                    .textAlign(TextAlign.Start)
+                  Text(this.downloadAskMode ? '每次下载完成后选择保存位置' : '应用目录（自动导出到文件管理）')
+                    .fontSize(Math.round(10 * getUiScale()))
+                    .fontColor(C('text_tertiary'))
+                    .width('100%')
+                    .textAlign(TextAlign.Start)
+                }
+                .layoutWeight(1)
+                .alignItems(HorizontalAlign.Start)
+
+                Toggle({ type: ToggleType.Switch, isOn: this.downloadAskMode })
+                  .selectedColor(C('accent'))
+                  .width(44)
+                  .height(26)
+                  .onChange((isOn: boolean) => this.onToggle('askMode', isOn))
+              }
+              .width('100%')
+              .padding({ top: 11, bottom: 11 })
+            }
+            .width('100%')
+            .padding({ left: 14, right: 14 })
+            .borderRadius(ZRadius.card)
+            .backgroundColor(C('surface_alt'))
 
             // 搜索
             this.sectionTitle('搜索');
@@ -280,7 +316,25 @@ export struct SettingsPanel {
               this.switchRow('阻止图片加载', '省流量，弱网下更快', this.blockImages, 'blockImages', false)
               this.switchRow('保存浏览记录', '', this.saveHistory, 'saveHistory', false)
               this.switchRow('允许 JavaScript', '关闭后部分网页无法正常显示', this.jsEnabled, 'js', false)
-              this.switchRow('发送「不追踪」请求', '', this.dnt, 'dnt', true)
+              this.switchRow('桌面版网页', '以电脑版方式浏览网页', this.desktopUA, 'desktopUA', false)
+            this.switchRow('H5 远程调试', '开启后可用 PC Chrome 调试网页（见下方说明）', this.debugH5, 'debugH5', true)
+
+            if (this.debugH5) {
+              Column({ space: 4 }) {
+                Text('调试方法：')
+                  .fontSize(Math.round(10 * getUiScale()))
+                  .fontColor(C('text_secondary'))
+                  .width('100%')
+                  .textAlign(TextAlign.Start)
+                Text('1. 电脑连接手机后执行：hdc fport tcp:9222 tcp:9222\n2. 电脑 Chrome 打开 chrome://inspect\n3. 在列表中点击页面下的 inspect 即可调试')
+                  .fontSize(Math.round(10 * getUiScale()))
+                  .fontColor(C('text_tertiary'))
+                  .width('100%')
+                  .textAlign(TextAlign.Start)
+              }
+              .width('100%')
+              .padding({ top: 8, bottom: 10 })
+            }
             }
             .width('100%')
             .padding({ left: 14, right: 14 })

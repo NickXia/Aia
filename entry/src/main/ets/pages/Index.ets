@@ -1,13 +1,16 @@
 import { promptAction } from '@kit.ArkUI';
-import { pasteboard } from '@kit.BasicServicesKit';
+import { webview } from '@kit.ArkWeb';
+import { picker, fileUri, fileIo } from '@kit.CoreFileKit';
+import { common, Want, wantConstant } from '@kit.AbilityKit';
+import { DownloadsPanel } from '../view/DownloadsPanel';
+import { DownloadItem } from '../model/Models';
+import { pasteboard, BusinessError } from '@kit.BasicServicesKit';
 import { photoAccessHelper } from '@kit.MediaLibraryKit';
-import { fileIo, fileUri } from '@kit.CoreFileKit';
 import { BrowserTab, Bookmark, HistoryEntry, TabInfo, DialItem } from '../model/Models';
 import { ENGINES, SearchEngine } from '../common/SearchEngine';
 import { hostOf, resolveInput, isSecure, colorForHost } from '../common/UrlUtils';
 import { AiaStore } from '../common/Storage';
-import { setUiScale, getUiScale, setThemeMode, getThemeMode } from '../common/AiaTheme';
-import { C } from '../common/AiaTheme';
+import { setUiScale, getUiScale, setThemeMode, C } from '../common/AiaTheme';
 import { WebPane } from '../view/WebPane';
 import { HomeView } from '../view/HomeView';
 import { AddressBar } from '../view/AddressBar';
@@ -58,6 +61,15 @@ struct Index {
   @StorageLink('themeEpoch') themeEpoch: number = 0;
   /** 活动标签网页加载失败（WebPane 写入），显示错误出路 */
   @StorageLink('loadFailed') loadFailed: boolean = false;
+  @State downloads: DownloadItem[] = AiaStore.loadDownloads();
+  @State downloadsVisible: boolean = false;
+  @State desktopUA: boolean = AiaStore.desktopUA;
+  @State debugH5: boolean = AiaStore.debugH5;
+  @State downloadAskMode: boolean = AiaStore.downloadAskMode;
+  private downloadDelegate: webview.WebDownloadDelegate = new webview.WebDownloadDelegate();
+  // delegate 本体在 Index 管理（状态/持久化都在这），WebPane 创建内核时
+  // 通过 AppStorage 取到并 controller.setDownloadDelegate 注册——
+  // 此前漏了注册这一步，网页下载事件无人接收
 
   private seq: number = 0;
 
@@ -77,10 +89,182 @@ struct Index {
       setUiScale(1.25);
     }
     // 阅读模式（羊皮卷主题）
+    this.desktopUA = AiaStore.desktopUA;
+    this.debugH5 = AiaStore.debugH5;
+    this.downloadAskMode = AiaStore.downloadAskMode;
     this.readingTheme = AiaStore.readingTheme;
     if (this.readingTheme) {
       setThemeMode('parchment');
     }
+    // 下载委托：全局注册一次，网页触发的下载统一走这里
+    // delegate 通过 AppStorage 共享给各 WebPane（内核创建时 setDownloadDelegate 注册）
+    AppStorage.setOrCreate<webview.WebDownloadDelegate>('downloadDelegate', this.downloadDelegate);
+    this.downloadDelegate.onBeforeDownload((item: webview.WebDownloadItem) => {
+      const url: string = item.getUrl();
+      let name: string = url.substring(url.lastIndexOf('/') + 1).split('?')[0];
+      if (name.length === 0) {
+        name = 'download_' + Date.now();
+      }
+      const dir: string = getContext(this).filesDir + '/downloads';
+      try {
+        fileIo.mkdirSync(dir, true);
+      } catch (err) {
+        // 目录已存在
+      }
+      const path: string = dir + '/' + name;
+      const d: DownloadItem = new DownloadItem(item.getGuid(), url, name, path);
+      const list: DownloadItem[] = this.downloads.slice();
+      list.unshift(d);
+      this.downloads = AiaStore.trimDownloads(list);
+      AiaStore.saveDownloads(this.downloads);
+      item.start(path);
+      promptAction.showToast({ message: '开始下载：' + name });
+      // 首次下载：询问用户偏好的保存位置（仅一次，调度回主线程弹窗）
+      if (!AiaStore.downloadAsked) {
+        AiaStore.downloadAsked = true;
+        setTimeout(() => {
+        this.getUIContext().showAlertDialog({
+          title: '下载位置',
+          message: '文件默认保存在应用目录（可在下载管理中打开/导出）。是否改为每次下载时选择保存位置，便于自己查找？',
+          autoCancel: true,
+          alignment: DialogAlignment.Center,
+          primaryButton: {
+            value: '应用目录（推荐）',
+            fontColor: C('accent'),
+            action: () => {
+              AiaStore.downloadAskMode = false;
+            }
+          },
+          secondaryButton: {
+            value: '每次下载时询问',
+            fontColor: '#B4552E',
+            action: () => {
+              AiaStore.downloadAskMode = true;
+              promptAction.showToast({ message: '已开启：每次下载完成后可选择保存位置' });
+            }
+          }
+        });
+        }, 50);
+      }
+    });
+    this.downloadDelegate.onDownloadUpdated((item: webview.WebDownloadItem) => {
+      for (let i = 0; i < this.downloads.length; i++) {
+        if (this.downloads[i].guid === item.getGuid()) {
+          this.downloads[i].received = item.getReceivedBytes();
+          this.downloads[i].total = item.getTotalBytes();
+          this.downloads[i].speed = item.getCurrentSpeed();
+          const st: webview.WebDownloadState = item.getState();
+          if (st === webview.WebDownloadState.PAUSED) {
+            this.downloads[i].state = 'paused';
+          }
+          const action: string = WebPendingAction.consume(item.getGuid());
+          if (action === 'pause') {
+            item.pause();
+          } else if (action === 'resume') {
+            item.resume();
+          } else if (action === 'cancel') {
+            item.cancel();
+          }
+          break;
+        }
+      }
+    });
+    this.downloadDelegate.onDownloadFinish((item: webview.WebDownloadItem) => {
+      let doneIdx: number = -1;
+      for (let i = 0; i < this.downloads.length; i++) {
+        if (this.downloads[i].guid === item.getGuid()) {
+          this.downloads[i].state = 'done';
+          this.downloads[i].received = item.getTotalBytes();
+          this.downloads[i].total = item.getTotalBytes();
+          this.downloads[i].path = item.getFullPath();
+          doneIdx = i;
+          break;
+        }
+      }
+      AiaStore.saveDownloads(this.downloads);
+      // 自动导出到公共 Download（Chrome 式）：DOWNLOAD 模式系统直接落盘文件管理
+      if (doneIdx < 0) {
+        return;
+      }
+      if (AiaStore.downloadAskMode) {
+        // 用户自定义模式：弹出系统保存对话框，可浏览/新建目录选择保存位置
+        // 注意：delegate 回调可能不在 UI 线程，picker 必须 setTimeout 调度回主线程
+        const idx: number = doneIdx;
+        setTimeout(() => {
+          try {
+            const pickerInst = new picker.DocumentViewPicker();
+            const opt: picker.DocumentSaveOptions = {
+              newFileNames: [this.downloads[idx].fileName]
+            };
+                pickerInst.save(opt).then((newUris: Array<string>) => {
+                if (newUris.length > 0) {
+                  this.downloads[idx].publicUri = newUris[0];
+                  try {
+                    fileIo.copyFileSync(this.downloads[idx].path, newUris[0]);
+                    try {
+                      fileIo.unlinkSync(this.downloads[idx].path); // 已移到用户选的位置
+                    } catch (err) {
+                      // ignore
+                    }
+                    this.downloads[idx].path = newUris[0];
+                    promptAction.showToast({ message: '已保存到你选择的位置' });
+                  } catch (err) {
+                    promptAction.showToast({ message: '保存失败，文件保留在应用目录' });
+                  }
+                  AiaStore.saveDownloads(this.downloads);
+                } else {
+                  promptAction.showToast({ message: '已取消保存，文件在应用目录' });
+                }
+              }).catch((e: BusinessError) => {
+                console.info('AiaDL askSave fail code=' + e.code);
+                promptAction.showToast({ message: '保存失败(' + e.code + ')，文件在应用目录' });
+              });
+          } catch (err) {
+            console.info('AiaDL askSave setup fail');
+          }
+        }, 50);
+        return;
+      }
+      // 应用目录模式：自动导出公共 Download（Chrome 式）
+      try {
+        const pickerInst = new picker.DocumentViewPicker();
+        const opt: picker.DocumentSaveOptions = {
+          newFileNames: [this.downloads[doneIdx].fileName],
+          pickerMode: picker.DocumentPickerMode.DOWNLOAD
+        };
+        const idx2: number = doneIdx;
+        pickerInst.save(opt).then((newUris: Array<string>) => {
+          if (newUris.length > 0) {
+            this.downloads[idx2].publicUri = newUris[0];
+            try {
+              fileIo.copyFileSync(this.downloads[idx2].path, newUris[0]);
+              try {
+                fileIo.unlinkSync(this.downloads[idx2].path); // 已移到 Download，不留双份
+              } catch (err) {
+                // ignore
+              }
+              this.downloads[idx2].path = newUris[0];
+            } catch (err) {
+              // 移动失败保留沙箱原件，文件至少在 Download 有一份
+            }
+            AiaStore.saveDownloads(this.downloads);
+          }
+        }).catch(() => {
+        });
+      } catch (err) {
+        // ignore
+      }
+      promptAction.showToast({ message: '下载完成，已保存到文件管理' });
+    });
+    this.downloadDelegate.onDownloadFailed((item: webview.WebDownloadItem) => {
+      for (let i = 0; i < this.downloads.length; i++) {
+        if (this.downloads[i].guid === item.getGuid()) {
+          this.downloads[i].state = 'failed';
+          break;
+        }
+      }
+      AiaStore.saveDownloads(this.downloads);
+    });
     // 空白页看门狗：任何未知路径把应用留在占位页超过 1.6 秒，自动回主页。
     // 覆盖系统边缘返回手势等无法穷举的时序，保证用户永远不会面对白屏。
     setInterval(() => this.blankWatchdog(), 700);
@@ -130,15 +314,66 @@ struct Index {
       const u: string = tab.controller.getUrl();
       const idle: boolean = !tab.isLoading && !tab.expectBlankHome;
       const fresh: boolean = Date.now() - tab.lastNavTime < 1600;
-      if ((u === 'about:blank' || u.length === 0) && idle && !fresh) {
+      // 只有「本来就是空标签」（tab.url 为空、用户开新标签停在主页态）才自愈；
+      // 带目标 URL 的标签内核启动慢（首次 attach 后几秒才 commit），
+      // 此间 getUrl 仍是 about:blank——绝不能抢跳主页，否则用户看到导航被吞
+      if (tab.url.length === 0 && (u === 'about:blank' || u.length === 0) && idle && !fresh) {
         this.goHome();
+        return;
+      }
+      // ArkWeb 对 DNS 解析失败等场景静默无回调：导航 15 秒后仍无任何
+      // pageBegin 且无加载活动 → 疑似加载失败。但内核回调漏报时页面
+      // 可能实际已渲染（SPA 跳转/深链拦截等都可能吞回调）——先探测
+      // 文档真实内容，确有内容就当加载成功，绝不误弹错误卡。
+      if (!tab.isLoading && !tab.pageBeginSeen && !this.loadFailed && !tab.userStopped
+        && Date.now() - tab.lastNavTime > 15000) {
+        if (!tab.retriedOnce) {
+          tab.retriedOnce = true;
+          tab.lastNavTime = Date.now();
+          tab.pageBeginSeen = false;
+          try {
+            if (tab.controller !== null) {
+              tab.controller.loadUrl(tab.url);
+            }
+          } catch (err) {
+            // ignore
+          }
+          return;
+        }
+        if (!tab.probeBusy) {
+          tab.probeBusy = true;
+          tab.controller.runJavaScriptExt(
+            'String(document.body ? document.body.innerText.length : 0)')
+            .then((r: webview.JsMessageExt) => {
+              const len: number = parseInt(r.getString(), 10);
+              if (!isNaN(len) && len > 50) {
+                // 页面实际有内容：修正状态，视为加载成功
+                tab.pageBeginSeen = true;
+                tab.isLoading = false;
+                tab.progress = 100;
+                tab.lastNavTime = Date.now();
+              } else {
+                console.info('AiaWatch probe empty len=' + r.getString() + ' url=' + tab.url);
+                AppStorage.setOrCreate<boolean>('loadFailed', true);
+              }
+            })
+            .catch(() => {
+              console.info('AiaWatch probe fail -> loadFailed');
+              AppStorage.setOrCreate<boolean>('loadFailed', true);
+            })
+            .finally(() => {
+              tab.probeBusy = false;
+            });
+        }
       }
     } catch (err) {
       // 内核状态不可读时跳过本轮
     }
   }
 
-  onBackPress(): boolean {    if (this.dialEditorVisible) {      this.dialEditorVisible = false;
+  onBackPress(): boolean {
+    if (this.dialEditorVisible) {
+      this.dialEditorVisible = false;
       return true;
     }
     if (this.menuVisible) {
@@ -147,6 +382,10 @@ struct Index {
     }
     if (this.tabsVisible) {
       this.tabsVisible = false;
+      return true;
+    }
+    if (this.downloadsVisible) {
+      this.downloadsVisible = false;
       return true;
     }
     if (this.recordsVisible) {
@@ -216,6 +455,21 @@ struct Index {
     this.tabsVisible = false;
   }
 
+  /** 网页 target=_blank 的新窗口：在新标签打开并立即激活 */
+  private openInNewTab(url: string): void {
+    console.info('AiaNav openInNewTab ' + url);
+    const tab: BrowserTab = this.newTab();
+    tab.url = url;
+    // 导航状态与 navigate() 对齐：lastNavTime 不补会恒触发看门狗重试
+    tab.lastNavTime = Date.now();
+    tab.pageBeginSeen = false;
+    tab.retriedOnce = false;
+    tab.loadError = false;
+    tab.userStopped = false;
+    this.activeId = tab.id;
+    this.showHome = false;
+  }
+
   private activate(id: string): void {
     this.activeId = id;
     this.showHome = this.tabById(id).url.length === 0;
@@ -240,6 +494,11 @@ struct Index {
       this.showHome = true;
       if (only.controller !== null) {
         only.controller.loadUrl('about:blank');
+        try {
+          only.controller.clearHistory();
+        } catch (err) {
+          // ignore
+        }
       }
       this.tabsVisible = false;
       return;
@@ -283,7 +542,12 @@ struct Index {
     tab.canGoBack = false;
     tab.canGoForward = false;
     tab.lastNavTime = Date.now();
+    tab.pageBeginSeen = false;
+    tab.loadError = false;
+    tab.retriedOnce = false;
+    tab.userStopped = false;
     tab.expectBlankHome = false;
+    AppStorage.setOrCreate<boolean>('loadFailed', false);
     tab.progress = 0;
     tab.isLoading = true;
     AppStorage.setOrCreate<number>('loadingPct', 0);
@@ -308,6 +572,13 @@ struct Index {
     this.showHome = true;
     if (tab.controller !== null) {
       tab.controller.loadUrl('about:blank');
+      // 清空网页历史：避免占位页/重定向垃圾滞留栈内，
+      // 让「进入网页 → 返回」始终一步回主页，且下次返回语义干净
+      try {
+        tab.controller.clearHistory();
+      } catch (err) {
+        // ignore
+      }
     }
   }
 
@@ -426,6 +697,9 @@ struct Index {
     if (!this.saveHistory || tab.url.length === 0) {
       return;
     }
+    if (tab.loadError) {
+      return; // 加载失败的页面不进历史（HTTP 错误页/超时页）
+    }
     if (tab.url.startsWith('about:') || tab.title === 'about:blank') {
       return;
     }
@@ -478,14 +752,181 @@ struct Index {
     }
   }
 
-  private clearRecords(): void {
-    if (this.recordsMode === 'history') {
-      this.history = [];
-      AiaStore.clearHistory();
-    } else {
-      this.bookmarks = [];
-      AiaStore.saveBookmarks([]);
+  // ------------------------------------------------------------ 下载管理
+  private pauseResumeDownload(guid: string, toPause: boolean): void {
+    const delegate = this.downloadDelegate;
+    // 通过 WebDownloadManager 查找活动任务进行暂停/继续：
+    // ArkWeb 的暂停/继续需要在 delegate 回调持有的 item 上调用，
+    // 因此这里记录 pending 动作，由下一次 onDownloadUpdated 驱动。
+    for (let i = 0; i < this.downloads.length; i++) {
+      if (this.downloads[i].guid === guid) {
+        this.downloads[i].state = toPause ? 'paused' : 'progressing';
+        break;
+      }
     }
+    AiaStore.saveDownloads(this.downloads);
+    WebPendingAction.set(guid, toPause ? 'pause' : 'resume');
+  }
+
+  private cancelDownload(guid: string): void {
+    WebPendingAction.set(guid, 'cancel');
+    for (let i = 0; i < this.downloads.length; i++) {
+      if (this.downloads[i].guid === guid) {
+        this.downloads[i].state = 'canceled';
+        break;
+      }
+    }
+    AiaStore.saveDownloads(this.downloads);
+  }
+
+  /** 扩展名 -> MIME（打开文件用），未识别类型走通用二进制 */
+  private mimeOfExt(fileName: string): string {
+    const e: string = fileName.substring(fileName.lastIndexOf('.') + 1).toLowerCase();
+    if (e === 'pdf') { return 'application/pdf'; }
+    if (e === 'apk') { return 'application/vnd.android.package-archive'; }
+    if (e === 'zip' || e === 'rar' || e === '7z') { return 'application/zip'; }
+    if (e === 'png') { return 'image/png'; }
+    if (e === 'jpg' || e === 'jpeg') { return 'image/jpeg'; }
+    if (e === 'mp3') { return 'audio/mpeg'; }
+    if (e === 'mp4') { return 'video/mp4'; }
+    if (e === 'txt' || e === 'csv') { return 'text/plain'; }
+    if (e === 'doc' || e === 'docx') { return 'application/msword'; }
+    if (e === 'xls' || e === 'xlsx') { return 'application/vnd.ms-excel'; }
+    return 'application/octet-stream';
+  }
+
+  /** 用系统「打开方式」打开已下载文件（带临时读授权） */
+  private openDownload(guid: string): void {
+    for (let i = 0; i < this.downloads.length; i++) {
+      if (this.downloads[i].guid === guid) {
+        const d = this.downloads[i];
+        if (d.path.length === 0) {
+          return;
+        }
+        try {
+          // path 可能是沙箱路径或 picker 返回的 file:// uri，分别处理
+          const openUri: string = d.path.startsWith('file://') ? d.path
+            : fileUri.getUriFromPath(d.path);
+          const ctx = getContext(this) as common.UIAbilityContext;
+          const want: Want = {
+            uri: openUri,
+            type: this.mimeOfExt(d.fileName),
+            action: 'ohos.want.action.viewData',
+            flags: wantConstant.Flags.FLAG_AUTH_READ_URI_PERMISSION
+          };
+          ctx.startAbility(want).catch(() => {
+            promptAction.showToast({ message: '没有可打开此文件的应用' });
+          });
+        } catch (err) {
+          promptAction.showToast({ message: '打开失败' });
+        }
+        return;
+      }
+    }
+  }
+
+  /** 清空下载记录，可选是否删除真实文件（含公共副本）；进行中的任务先取消 */
+  private clearDownloads(): void {
+    if (this.downloads.length === 0) {
+      return;
+    }
+    const doneCount: number = this.downloads.filter((d: DownloadItem) => d.state === 'done').length;
+    const snapshot: DownloadItem[] = this.downloads.slice();
+    this.getUIContext().showAlertDialog({
+      title: '清空下载记录',
+      message: doneCount > 0
+        ? '是否同时删除已下载的 ' + doneCount + ' 个文件？删除后无法恢复。'
+        : '将清空全部下载记录。',
+      autoCancel: true,
+      alignment: DialogAlignment.Center,
+      primaryButton: {
+        value: '仅清除记录',
+        action: () => {
+          this.finishClearDownloads(snapshot, false);
+        }
+      },
+      secondaryButton: {
+        value: '清除并删除文件',
+        fontColor: '#B4552E',
+        action: () => {
+          this.finishClearDownloads(snapshot, true);
+        }
+      }
+    });
+  }
+
+  /** 执行清空：delFiles=true 时删除沙箱原件与公共副本 */
+  private finishClearDownloads(snapshot: DownloadItem[], delFiles: boolean): void {
+    for (let i = 0; i < snapshot.length; i++) {
+      const d = snapshot[i];
+      if (d.state === 'progressing' || d.state === 'paused') {
+        WebPendingAction.set(d.guid, 'cancel');
+      }
+      if (delFiles && d.path.length > 0) {
+        try {
+          fileIo.unlinkSync(d.path); // 沙箱路径与 file:// uri 均可删除
+        } catch (err) {
+          // 文件可能已被移动或删除
+        }
+      }
+      if (delFiles && d.publicUri.length > 0) {
+        try {
+          fileIo.unlinkSync(d.publicUri);
+        } catch (err) {
+          // 公共副本删除失败不影响记录
+        }
+      }
+    }
+    this.downloads = [];
+    AiaStore.saveDownloads(this.downloads);
+    promptAction.showToast({ message: delFiles ? '已清空记录并删除文件' : '已清空下载记录' });
+  }
+
+  private deleteDownload(guid: string): void {
+    const rest: DownloadItem[] = [];
+    for (let i = 0; i < this.downloads.length; i++) {
+      if (this.downloads[i].guid !== guid) {
+        rest.push(this.downloads[i]);
+      }
+    }
+    this.downloads = rest;
+    AiaStore.saveDownloads(this.downloads);
+  }
+
+  /** 危险操作二次确认：确认后执行 confirm()，取消不动作 */
+  private confirmThen(title: string, message: string, confirm: () => void): void {
+    this.getUIContext().showAlertDialog({
+      title: title,
+      message: message,
+      autoCancel: true,
+      alignment: DialogAlignment.Center,
+      primaryButton: {
+        value: '取消',
+        fontColor: C('text_secondary'),
+        action: () => {
+        }
+      },
+      secondaryButton: {
+        value: '确定',
+        fontColor: '#B4552E',
+        action: () => {
+          confirm();
+        }
+      }
+    });
+  }
+
+  private clearRecords(): void {
+    const isHistory: boolean = this.recordsMode === 'history';
+    this.confirmThen('确认清空', isHistory ? '将清空全部浏览记录，此操作不可恢复。' : '将清空全部书签，此操作不可恢复。', () => {
+      if (isHistory) {
+        this.history = [];
+        AiaStore.clearHistory();
+      } else {
+        this.bookmarks = [];
+        AiaStore.saveBookmarks([]);
+      }
+    });
   }
 
   private async copyUrl(): Promise<void> {
@@ -622,12 +1063,20 @@ struct Index {
   private retryActive(): void {
     AppStorage.setOrCreate<boolean>('loadFailed', false);
     const tab: BrowserTab = this.activeTab();
-    if (tab.controller !== null) {
-      try {
+    if (tab.controller === null) {
+      return;
+    }
+    try {
+      if (tab.pageBeginSeen) {
+        // 内核已开始加载（HTTP 错误等）：刷新当前页即可
+        tab.loadError = false;
         tab.controller.refresh();
-      } catch (err) {
-        // ignore
+      } else {
+        // 静默失败（DNS 解析失败等）：refresh 无效，必须重新导航
+        this.navigate(tab.url);
       }
+    } catch (err) {
+      // ignore
     }
   }
 
@@ -644,6 +1093,8 @@ struct Index {
       this.toggleBookmark();
     } else if (key === 'copy') {
       this.copyUrl();
+    } else if (key === 'downloads') {
+      this.downloadsVisible = true;
     } else if (key === 'reload') {
       this.reload();
     } else if (key === 'home') {
@@ -651,7 +1102,14 @@ struct Index {
     } else if (key === 'settings') {
       this.settingsVisible = true;
     } else if (key === 'close') {
-      this.closeTab(this.activeId);
+      const t: BrowserTab = this.activeTab();
+      if (t.url.length === 0) {
+        this.closeTab(t.id); // 空标签直接关
+      } else {
+        this.confirmThen('关闭标签', '将关闭「' + (t.title.length > 0 ? t.title : t.url) + '」，确认关闭？', () => {
+          this.closeTab(t.id);
+        });
+      }
     }
   }
 
@@ -723,21 +1181,17 @@ struct Index {
               blockImages: this.blockImages,
               jsEnabled: this.jsEnabled,
               doNotTrack: this.dnt,
+              desktopUA: this.desktopUA,
               readingTheme: this.readingTheme,
               onPageStart: (t: BrowserTab) => this.handlePageStart(t),
-              onPageFinished: (t: BrowserTab) => this.handlePageFinished(t)
+              onPageFinished: (t: BrowserTab) => this.handlePageFinished(t),
+              onNewWindow: (url: string) => this.openInNewTab(url)
             })
           }, (tab: BrowserTab) => tab.id)
 
           if (this.showHome) {
             HomeView({
-              recents: this.history.slice(0, 4),
-              dials: this.dials,
-              onOpen: (url: string) => this.navigate(url),
-              onEditDial: (item: DialItem | null) => {
-                this.dialEditing = item;
-                this.dialEditorVisible = true;
-              }
+              onOpen: (url: string) => this.navigate(url)
             })
           }
         }
@@ -771,6 +1225,7 @@ struct Index {
         TabsPanel({
           infos: this.tabInfos(),
           activeId: this.activeId,
+          topAvoid: this.topAvoid,
           onSelect: (id: string) => this.activate(id),
           onCloseTab: (id: string) => this.closeTab(id),
           onCreate: () => this.createTab(),
@@ -794,6 +1249,20 @@ struct Index {
           onClearAll: () => this.clearRecords(),
           onClose: () => {
             this.recordsVisible = false;
+          }
+        })
+      }
+
+      if (this.downloadsVisible) {
+        DownloadsPanel({
+          downloads: $downloads,
+          onPauseResume: (guid: string, toPause: boolean) => this.pauseResumeDownload(guid, toPause),
+          onCancel: (guid: string) => this.cancelDownload(guid),
+          onDelete: (guid: string) => this.deleteDownload(guid),
+          onOpen: (guid: string) => this.openDownload(guid),
+          onClearAll: () => this.clearDownloads(),
+          onClose: () => {
+            this.downloadsVisible = false;
           }
         })
       }
@@ -869,6 +1338,9 @@ struct Index {
           saveHistory: this.saveHistory,
           jsEnabled: this.jsEnabled,
           dnt: this.dnt,
+          desktopUA: this.desktopUA,
+          debugH5: this.debugH5,
+          downloadAskMode: this.downloadAskMode,
           bgPath: this.bgImage,
           elderMode: this.elderMode,
           readingTheme: this.readingTheme,
@@ -885,6 +1357,31 @@ struct Index {
             } else if (key === 'dnt') {
               this.dnt = value;
               AiaStore.doNotTrack = value;
+            } else if (key === 'desktopUA') {
+              this.desktopUA = value;
+              AiaStore.desktopUA = value;
+              promptAction.showToast({ message: value ? '已切换桌面版网页' : '已恢复手机版网页' });
+            } else if (key === 'askMode') {
+              this.downloadAskMode = value;
+              AiaStore.downloadAskMode = value;
+              promptAction.showToast({ message: value ? '下载完成后将询问保存位置' : '下载保存到应用目录' });
+            } else if (key === 'debugH5') {
+              this.debugH5 = value;
+              AiaStore.debugH5 = value;
+              try {
+                if (value) {
+                  try {
+                    webview.WebviewController.setWebDebuggingAccess(true, 9222);
+                  } catch (e1) {
+                    webview.WebviewController.setWebDebuggingAccess(true);
+                  }
+                  promptAction.showToast({ message: '调试已开启，按设置页说明连接 Chrome' });
+                } else {
+                  webview.WebviewController.setWebDebuggingAccess(false);
+                }
+              } catch (err) {
+                promptAction.showToast({ message: '开关失败，重启应用后生效' });
+              }
             } else if (key === 'elderMode') {
               // 关怀模式：切换缩放因子并整树重建 UI
               this.elderMode = value;
@@ -926,5 +1423,22 @@ struct Index {
     .width('100%')
     .height('100%')
     .backgroundColor(C('page_bg'))
+  }
+}
+
+/** 挂起的下载动作队列：UI 面板发起，delegate 的下一次 onDownloadUpdated 消费 */
+export class WebPendingAction {
+  static map: Map<string, string> = new Map();
+
+  static set(guid: string, action: string): void {
+    WebPendingAction.map.set(guid, action);
+  }
+
+  static consume(guid: string): string {
+    const a: string | undefined = WebPendingAction.map.get(guid);
+    if (a !== undefined) {
+      WebPendingAction.map.delete(guid);
+    }
+    return a === undefined ? '' : a;
   }
 }

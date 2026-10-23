@@ -36,10 +36,35 @@ export struct AddressBar {
         .textAlign(TextAlign.Start)
 
       if (!this.home) {
+        // 刷新/停止按钮：独立点击区（子组件 onClick 优先于父级胶囊，
+        // 不会再触发地址编辑态）；加载中显示停止，空闲显示刷新
         Image(this.tab.isLoading ? $r('app.media.ic_close') : $r('app.media.ic_refresh'))
-          .width(15)
-          .height(15)
+          .width(24)
+          .height(24)
+          .padding(4.5)
           .opacity(0.55)
+          .onClick(() => {
+            const ctrl = this.tab.controller;
+            if (ctrl === null || ctrl === undefined) {
+              return;
+            }
+            try {
+              if (this.tab.isLoading) {
+                ctrl.stop();
+                // ArkWeb 的 stop() 无回调：手动复位加载状态，
+                // 否则图标停在 ✕、进度圈永远转
+                this.tab.isLoading = false;
+                this.tab.progress = 100;
+                this.tab.userStopped = true; // 看门狗不再自动重试
+                AppStorage.setOrCreate<number>('loadingPct', 100);
+              } else {
+                this.tab.userStopped = false;
+                ctrl.refresh();
+              }
+            } catch (err) {
+              // 内核未就绪（如占位页）时忽略
+            }
+          })
       }
     }
     .width('100%')
@@ -48,7 +73,9 @@ export struct AddressBar {
     .borderRadius(ZRadius.pill)
     .backgroundColor(C('surface_alt'))
     .onClick(() => {
-      this.draft = this.tab.url;
+      // 点击进入编辑态时清空草稿：用户点击地址栏的意图是「新搜索/新网址」，
+      // 预填旧 URL 会导致打字追加到原网址后面（真实场景产生 404/400）
+      this.draft = '';
       this.editing = true;
     })
   }
@@ -56,7 +83,7 @@ export struct AddressBar {
   @Builder
   editor() {
     Row({ space: 4 }) {
-      TextInput({ text: this.draft, placeholder: '搜索或输入网址' })
+      TextInput({ text: this.draft, placeholder: this.home ? '搜索或输入网址' : prettyUrl(this.tab.url) })
         .id('aia-address')
         .layoutWeight(1)
         .height(ZSize.pill)

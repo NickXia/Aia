@@ -33,18 +33,30 @@ export class ZSpace {
 
 export class ZRadius {
   static get pill(): number { return 100; }
-  static get card(): number { return vs(16); }
-  static get sheet(): number { return vs(24); }
-  static get small(): number { return vs(10); }
+  static get card(): number { return vs(18); }
+  static get sheet(): number { return vs(28); }
+  static get small(): number { return vs(12); }
 }
 
 export class ZFont {
   static get caption(): number { return vs(11); }
   static get footnote(): number { return vs(12); }
-  static get body(): number { return vs(14); }
+  static get body(): number { return vs(15); }
   static get callout(): number { return vs(15); }
-  static get title(): number { return vs(17); }
+  static get heading(): number { return vs(17); }
+  static get title(): number { return vs(19); }
   static get display(): number { return vs(30); }
+}
+
+/**
+ * 字重规范（全体组件统一引用，禁止魔法数字）：
+ * Regular 400 正文 / Medium 500 强调与按钮 / Semibold 600 标题 / Bold 700 数字与首字母
+ */
+export class ZWeight {
+  static readonly regular: FontWeight = FontWeight.Regular;
+  static readonly medium: FontWeight = FontWeight.Medium;
+  static readonly semibold: FontWeight = FontWeight.Medium; // ArkUI 无 600，用 Medium+大一号表达
+  static readonly bold: FontWeight = FontWeight.Bold;
 }
 
 export class ZSize {
@@ -73,33 +85,35 @@ export function getThemeMode(): ThemeMode {
 }
 
 const SYS_LIGHT: Record<string, string> = {
-  'page_bg': '#F8F5EC',
-  'surface': '#F6F2E8',
-  'surface_alt': '#ECE6D6',
-  'surface_alt_2': '#E2DAC5',
-  'divider': '#DDD4BF',
-  'text_primary': '#211E18',
-  'text_secondary': '#57503F',
-  'text_tertiary': '#8A8270',
-  'accent': '#3E5C63',
-  'danger': '#A83F2E',
-  'seal': '#A83F2E',
-  'scrim': '#5C28241C'
+  'page_bg': '#F7F8FC',
+  'surface': '#FFFFFF',
+  'surface_alt': '#EEF1F8',
+  'surface_alt_2': '#E2E7F2',
+  'divider': '#E6E9F2',
+  'text_primary': '#16181D',
+  'text_secondary': '#4D5464',
+  'text_tertiary': '#98A0B0',
+  'accent': '#4F6BFF',
+  'accent_2': '#9B5CFF',
+  'danger': '#E5484D',
+  'seal': '#4F6BFF',
+  'scrim': '#14161F99'
 };
 
 const SYS_DARK: Record<string, string> = {
-  'page_bg': '#1C1C1A',
-  'surface': '#222220',
-  'surface_alt': '#2B2B28',
-  'surface_alt_2': '#343430',
-  'divider': '#38372F',
-  'text_primary': '#F2EEE2',
-  'text_secondary': '#C0B8A4',
-  'text_tertiary': '#928C7A',
-  'accent': '#93B1A5',
-  'danger': '#C05A48',
-  'seal': '#B0503C',
-  'scrim': '#A0000000'
+  'page_bg': '#101319',
+  'surface': '#181C26',
+  'surface_alt': '#222734',
+  'surface_alt_2': '#2C3240',
+  'divider': '#272D3A',
+  'text_primary': '#F2F4FA',
+  'text_secondary': '#BAC0CE',
+  'text_tertiary': '#7E8594',
+  'accent': '#7C9AFF',
+  'accent_2': '#B08CFF',
+  'danger': '#FF6B6E',
+  'seal': '#7C9AFF',
+  'scrim': '#CC000510'
 };
 
 /** 羊皮卷阅读主题：暖纸底 + 深棕墨字 + 皮革棕强调，昼夜通用 */

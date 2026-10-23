@@ -18,6 +18,16 @@ export class BrowserTab {
   lastNavTime: number = 0;
   /** 返回键按下后置位：下一个 about:blank pageEnd 代表「退到占位页」，应回主页 */
   expectBlankHome: boolean = false;
+  /** 本次导航是否收到过 onPageBegin（ArkWeb 对 DNS 失败等场景静默无回调，用于超时判定） */
+  pageBeginSeen: boolean = false;
+  /** 本次导航是否发生过资源加载错误（HTTP 404/超时等），用于过滤失败页入历史 */
+  loadError: boolean = false;
+  /** 弱网自动重试：本次导航是否已自动重试过一次 */
+  retriedOnce: boolean = false;
+  /** 看门狗内容探测进行中：防止每次 tick 叠发探针 */
+  probeBusy: boolean = false;
+  /** 用户手动停止了加载：看门狗不再自动重试，下次导航时清除 */
+  userStopped: boolean = false;
   controller: webview.WebviewController | null = null;
 
   constructor(id: string) {
@@ -88,4 +98,32 @@ export interface DialItem {
   name: string;
   url: string;
   color: string;
+}
+
+/** 下载任务状态：progressing / paused / done / failed / canceled */
+@Observed
+export class DownloadItem {
+  guid: string;
+  url: string;
+  fileName: string;
+  path: string;
+  total: number;
+  received: number;
+  speed: number;
+  state: string;
+  time: number;
+  /** 下载完成后导出到公共 Download 的 uri（文件管理可见） */
+  publicUri: string = '';
+
+  constructor(guid: string, url: string, fileName: string, path: string) {
+    this.guid = guid;
+    this.url = url;
+    this.fileName = fileName;
+    this.path = path;
+    this.total = 0;
+    this.received = 0;
+    this.speed = 0;
+    this.state = 'progressing';
+    this.time = Date.now();
+  }
 }

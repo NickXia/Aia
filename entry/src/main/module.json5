@@ -56,7 +56,36 @@
       },
       {
         "name": "ohos.permission.GET_NETWORK_INFO"
+      },
+      {
+        "name": "ohos.permission.GET_BUNDLE_INFO"
       }
+    ],
+    "querySchemes": [
+      "zhihu",
+      "bilibili",
+      "baiduboxapp",
+      "baiduboxlite",
+      "taobao",
+      "tbopen",
+      "jdopen",
+      "openapp.jdmobile",
+      "weixin",
+      "alipay",
+      "alipays",
+      "mqq",
+      "mqqapi",
+      "weibo",
+      "sinaweibo",
+      "snssdk1128",
+      "snssdk1233",
+      "xhsdiscover",
+      "dianping",
+      "intent",
+      "tel",
+      "mailto",
+      "sms",
+      "maps"
     ]
   }
 }

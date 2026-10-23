@@ -35,6 +35,7 @@ export struct MenuSheet {
       new MenuEntry('reload', '刷新', $r('app.media.ic_refresh')),
       new MenuEntry('home', '主页', $r('app.media.ic_home')),
       new MenuEntry('settings', '设置', $r('app.media.ic_settings')),
+      new MenuEntry('downloads', '下载管理', $r('app.media.ic_download')),
       new MenuEntry('close', '关闭标签', $r('app.media.ic_close_sm'))
     ];
   }
