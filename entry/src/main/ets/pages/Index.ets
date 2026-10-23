@@ -1,6 +1,6 @@
 import { promptAction } from '@kit.ArkUI';
 import { webview } from '@kit.ArkWeb';
-import { picker, fileUri, fileIo } from '@kit.CoreFileKit';
+import { picker, fileUri, fileIo, fileShare } from '@kit.CoreFileKit';
 import { common, Want, wantConstant } from '@kit.AbilityKit';
 import { DownloadsPanel } from '../view/DownloadsPanel';
 import { DownloadItem } from '../model/Models';
@@ -67,6 +67,8 @@ struct Index {
   private downloadDelegate: webview.WebDownloadDelegate = new webview.WebDownloadDelegate();
   // 下载导航错误忽略状态：构造 WebPane 时按引用传入（ADR-2，取代 dlNavAt/dlPicking 幽灵键）
   private dlGate: DownloadNavGate = new DownloadNavGate();
+  /** 用户授权的下载文件夹 uri（空串=未选定）：文件夹级授权内可创建/删除自己的文件 */
+  private downloadDirUri: string = AiaStore.downloadDirUri;
   // 进行中下载的活引用表：pause/resume 必须在 item 对象上直接调用。
   // 不能走「队列 + 等 onDownloadUpdated 消费」——暂停后内核不再派发
   // updated 回调，队列里的 resume 永远没人消费，任务就永远卡在暂停态
@@ -147,10 +149,49 @@ struct Index {
         promptAction.showToast({ message: '开始下载：' + name });
       };
       if (askMode) {
-        // 下载开始前先让用户选保存位置和文件名（不再等下载完才问）。
-        // item.start 只接受沙箱路径，故先落到应用临时目录，
-        // 完成后自动搬移到所选位置（见 onDownloadFinish）
+        // 「自定义文件夹」模式：文件夹授权一次性选定（含删除权），
+        // 下载完成后自动保存进去——不再每次下载弹选择器，
+        // 也从根本上消除了旧 save() 方案预创建 0B 占位文件的残留问题。
+        if (this.downloadDirPath().length > 0) {
+          startNow();
+          return;
+        }
         setTimeout(() => {
+          // API 26 起手机支持 DocumentSelectMode.FOLDER（canIUse 判定，
+          // 不能按设备类型硬判断）；不支持则降级为旧的逐下载 save() 流程
+          const canFolder: boolean =
+            canIUse('SystemCapability.FileManagement.UserFileService.FolderSelection');
+          if (canFolder) {
+            this.pickDownloadFolder((ok: boolean) => {
+              if (ok) {
+                // 文件夹选择期间 dlGate.picking 一直为 true（忽略内核补发
+                // 错误），选定后结束选择器态开始下载
+                this.dlGate.picking = false;
+                startNow();
+              } else {
+                // 用户取消选择文件夹：取消下载，不偷偷下到应用目录
+                this.dlGate.picking = false;
+                try {
+                  item.cancel();
+                } catch (err) {
+                  // ignore
+                }
+                this.liveItems.delete(guid);
+                const kept: DownloadItem[] = [];
+                for (let i = 0; i < this.downloads.length; i++) {
+                  if (this.downloads[i].guid === guid) {
+                    this.downloads[i].state = 'canceled';
+                  }
+                  kept.push(this.downloads[i]);
+                }
+                this.downloads = kept;
+                AiaStore.saveDownloads(this.downloads);
+                promptAction.showToast({ message: '已取消下载' });
+              }
+            });
+            return;
+          }
+          // ---------- 降级流程（API < 26 设备）：每次下载前选保存文件名 ----------
           try {
             const pickerInst = new picker.DocumentViewPicker();
             const opt: picker.DocumentSaveOptions = {
@@ -191,13 +232,13 @@ struct Index {
             startNow();
           }
         }, 30);
-        // 首次下载：询问用户偏好的保存位置（仅一次）
+        // 首次下载：说明文件夹模式（仅一次）
         if (!AiaStore.downloadAsked) {
           AiaStore.downloadAsked = true;
           setTimeout(() => {
             self.getUIContext().showAlertDialog({
               title: '下载位置',
-              message: '已开启「每次下载前选择位置」：每次下载开始前会弹出文件夹选择器。可在设置中改回应用目录模式。',
+              message: '将弹出文件夹选择器，选定后所有下载自动保存到该文件夹（可在设置中更改或改回应用目录模式）。',
               autoCancel: true,
               alignment: DialogAlignment.Center,
               primaryButton: {
@@ -279,6 +320,24 @@ struct Index {
         return;
       }
       if (AiaStore.downloadAskMode) {
+        // 自定义文件夹模式：自动搬移到授权文件夹。
+        // 文件夹级授权下文件由应用创建（openSync CREATE），后续删除也由
+        // 应用执行（unlinkSync 可用）——不会再残留 0B 壳。
+        // 重名自动加序号，不覆盖用户已有文件。
+        const dirPath: string = this.downloadDirPath();
+        if (dirPath.length > 0) {
+          const target: string = this.uniqueTargetPath(dirPath, this.downloads[doneIdx].fileName);
+          if (this.moveToUri(this.downloads[doneIdx].path, target)) {
+            this.downloads[doneIdx].path = target;
+            this.downloads[doneIdx].publicUri = target;
+            promptAction.showToast({ message: '已保存到下载文件夹' });
+          } else {
+            promptAction.showToast({ message: '保存到文件夹失败，文件在应用目录' });
+          }
+          AiaStore.saveDownloads(this.downloads);
+          return;
+        }
+        // 文件夹授权失效（重启后临时授权过期）：降级为逐下载保存对话框
         // 用户自定义模式：弹出系统保存对话框，可浏览/新建目录选择保存位置
         // 注意：delegate 回调可能不在 UI 线程，picker 必须 setTimeout 调度回主线程
         // 竞态防护：picker 是异步的，回调执行时用户可能已删除/清空记录——
@@ -577,7 +636,7 @@ struct Index {
     const infos: TabInfo[] = [];
     for (let i = 0; i < this.tabs.length; i++) {
       const t: BrowserTab = this.tabs[i];
-      infos.push(new TabInfo(t.id, t.title, t.url, t.url.length === 0));
+      infos.push(new TabInfo(t.id, t.title, t.url, t.url.length === 0, t.incognito));
     }
     return infos;
   }
@@ -829,7 +888,8 @@ struct Index {
   }
 
   private recordHistory(tab: BrowserTab): void {
-    if (!this.saveHistory || tab.url.length === 0) {
+    // 无痕标签不落历史（核心承诺），设置关闭历史同样跳过
+    if (!this.saveHistory || tab.incognito || tab.url.length === 0) {
       return;
     }
     if (tab.loadError) {
@@ -1058,7 +1118,7 @@ struct Index {
   private moveToUri(srcPath: string, uri: string): boolean {
     let fd: number = -1;
     try {
-      const f = fileIo.openSync(uri, fileIo.OpenMode.READ_WRITE | fileIo.OpenMode.TRUNC);
+      const f = fileIo.openSync(uri, fileIo.OpenMode.READ_WRITE | fileIo.OpenMode.CREATE | fileIo.OpenMode.TRUNC);
       fd = f.fd;
       fileIo.copyFileSync(srcPath, fd);
       fileIo.closeSync(fd);
@@ -1158,6 +1218,102 @@ struct Index {
       }
       return false; // 连打开都失败：权限不够或已不存在
     }
+  }
+
+  /** 已授权下载文件夹的真实可用路径（未授权/已失效返回空串） */
+  private downloadDirPath(): string {
+    if (this.downloadDirUri.length === 0) {
+      return '';
+    }
+    try {
+      const p: string = new fileUri.FileUri(this.downloadDirUri).path;
+      return fileIo.accessSync(p) ? p : '';
+    } catch (err) {
+      return '';
+    }
+  }
+
+  /**
+   * 拉起文件夹选择器（API 26 起手机支持 FOLDER 模式）并持久化授权。
+   * 文件夹级授权后，应用可在其中创建/删除自己创建的文件——
+   * 从根本上解决「应用内删除后用户文件夹残留 0B 壳」问题。
+   */
+  private pickDownloadFolder(onDone: (ok: boolean) => void): void {
+    try {
+      const opt = new picker.DocumentSelectOptions();
+      opt.selectMode = picker.DocumentSelectMode.FOLDER;
+      const pickerInst = new picker.DocumentViewPicker();
+      pickerInst.select(opt).then((uris: Array<string>) => {
+        if (uris.length === 0) {
+          onDone(false);
+          return;
+        }
+        this.downloadDirUri = uris[0];
+        AiaStore.downloadDirUri = uris[0];
+        // 尝试持久化授权（重启后仍有效）；失败只影响重启后需要重选一次。
+        // 需要写/建/删三权：下载搬移(CREATE)、删除记录时 unlink(DELETE)
+        try {
+          const pi: fileShare.PolicyInfo = {
+            uri: uris[0],
+            operationMode: fileShare.OperationMode.WRITE_MODE
+              | fileShare.OperationMode.CREATE_MODE
+              | fileShare.OperationMode.DELETE_MODE
+          };
+          fileShare.persistPermission([pi]).catch(() => {
+            // 持久化失败不阻塞：本会话内临时授权仍有效
+          });
+        } catch (err) {
+          // ignore
+        }
+        onDone(true);
+      }).catch((e: BusinessError) => {
+        console.info('AiaDL folderPick fail code=' + e.code);
+        onDone(false);
+      });
+    } catch (err) {
+      onDone(false);
+    }
+  }
+
+  /** 目标文件夹内的唯一文件名：重名自动追加序号 */
+  private uniqueTargetPath(dirPath: string, fileName: string): string {
+    const dot: number = fileName.lastIndexOf('.');
+    const base: string = dot > 0 ? fileName.substring(0, dot) : fileName;
+    const ext: string = dot > 0 ? fileName.substring(dot) : '';
+    let candidate: string = dirPath + '/' + fileName;
+    let n: number = 1;
+    while (n <= 99) {
+      try {
+        if (!fileIo.accessSync(candidate)) {
+          return candidate;
+        }
+      } catch (err) {
+        return candidate; // access 异常视为不存在，交给后续写失败兜底
+      }
+      candidate = dirPath + '/' + base + '_' + n + ext;
+      n++;
+    }
+    return dirPath + '/' + base + '_' + Date.now() + ext;
+  }
+
+  /** 设置面板展示用文件夹名（uri 最后一段） */
+  private downloadDirName(): string {
+    if (this.downloadDirUri.length === 0) {
+      return '';
+    }
+    return this.downloadDirUri.substring(this.downloadDirUri.lastIndexOf('/') + 1);
+  }
+
+  /** 设置面板「更改/去选择」：重新拉起文件夹选择器 */
+  private changeDownloadFolder(): void {
+    this.pickDownloadFolder((ok: boolean) => {
+      if (ok) {
+        promptAction.showToast({ message: '已更新下载文件夹' });
+        this.uiEpoch = this.uiEpoch + 1; // 刷新设置面板文案
+      } else {
+        promptAction.showToast({ message: '未更改下载文件夹' });
+      }
+    });
   }
 
   /** 执行单条删除：delFile=true 时连沙箱原件与公共副本一起删 */
@@ -1405,6 +1561,13 @@ struct Index {
       this.goHome();
     } else if (key === 'settings') {
       this.settingsVisible = true;
+    } else if (key === 'incognito') {
+      // 无痕模式：新开一个不记录历史的标签并立即激活
+      const tab: BrowserTab = this.newTab();
+      tab.incognito = true;
+      this.activeId = tab.id;
+      this.showHome = true;
+      promptAction.showToast({ message: '已进入无痕模式（不记录历史）' });
     } else if (key === 'close') {
       const t: BrowserTab = this.activeTab();
       if (t.url.length === 0) {
@@ -1652,6 +1815,7 @@ struct Index {
           desktopUA: this.desktopUA,
           debugH5: this.debugH5,
           downloadAskMode: this.downloadAskMode,
+          downloadDirName: this.downloadDirName(),
           bgPath: this.bgImage,
           elderMode: this.elderMode,
           readingTheme: this.readingTheme,
@@ -1675,7 +1839,7 @@ struct Index {
             } else if (key === 'askMode') {
               this.downloadAskMode = value;
               AiaStore.downloadAskMode = value;
-              promptAction.showToast({ message: value ? '下载完成后将询问保存位置' : '下载保存到应用目录' });
+              promptAction.showToast({ message: value ? '下载将自动保存到所选文件夹' : '下载保存到应用目录' });
             } else if (key === 'debugH5') {
               this.debugH5 = value;
               AiaStore.debugH5 = value;
@@ -1720,6 +1884,9 @@ struct Index {
           },
           onPickBackground: (): void => {
             this.pickBackground();
+          },
+          onChangeFolder: (): void => {
+            this.changeDownloadFolder();
           },
           onClearBackground: (): void => {
             this.clearBackground();

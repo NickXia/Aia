@@ -35,6 +35,7 @@ const KEY_DESKTOP_UA: string = 'desktop_ua';
 const KEY_DEBUG_H5: string = 'debug_h5';
 const KEY_ASK_MODE: string = 'download_ask_mode';
 const KEY_ASKED: string = 'download_asked';
+const KEY_DIR_URI: string = 'download_dir_uri';
 
 /**
  * 轻量本地存储。全部走 Preferences，读写都是同步的（数据量很小）。
@@ -312,6 +313,19 @@ export class AiaStore {
 
   static set downloadAsked(v: boolean) {
     AiaStore.put(KEY_ASKED, v);
+  }
+
+  /**
+   * 用户授权的下载文件夹 uri（DocumentSelectMode.FOLDER 选择结果）。
+   * 文件夹级授权后，应用可在其中创建/删除自己创建的文件——
+   * 从根本上解决「应用内删除后用户文件夹残留 0B 壳」问题。
+   */
+  static get downloadDirUri(): string {
+    return AiaStore.getString(KEY_DIR_URI, '');
+  }
+
+  static set downloadDirUri(v: string) {
+    AiaStore.put(KEY_DIR_URI, v);
   }
 
   /** H5 远程调试开关（chrome://inspect 调试内核页面） */

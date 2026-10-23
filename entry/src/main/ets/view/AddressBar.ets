@@ -1,6 +1,6 @@
 import { prettyUrl, isSecure } from '../common/UrlUtils';
 import { BrowserTab } from '../model/Models';
-import { ZFont, ZRadius, ZSize } from '../common/AiaTheme';
+import { ZFont, ZRadius, ZSize, getUiScale } from '../common/AiaTheme';
 import { C } from '../common/AiaTheme';
 
 /**
@@ -26,6 +26,16 @@ export struct AddressBar {
         .width(15)
         .height(15)
         .opacity(0.65)
+
+      if (this.tab.incognito) {
+        // 无痕标识：深色小胶囊，始终可见提醒用户当前标签不记录历史
+        Text('无痕')
+          .fontSize(Math.round(10 * getUiScale()))
+          .fontColor('#ECEFF4')
+          .padding({ left: 6, right: 6, top: 2.5, bottom: 2.5 })
+          .borderRadius(9)
+          .backgroundColor('#2E3440')
+      }
 
       Text(this.home ? '搜索或输入网址' : prettyUrl(this.tab.url))
         .fontSize(ZFont.callout)

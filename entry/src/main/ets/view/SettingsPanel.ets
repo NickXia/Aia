@@ -21,8 +21,12 @@ export struct SettingsPanel {
   @Prop desktopUA: boolean;
   @Prop debugH5: boolean;
   @Prop downloadAskMode: boolean;
+  /** 已授权下载文件夹的展示名（空串=未选定） */
+  @Prop downloadDirName: string;
 
   onToggle: (key: string, value: boolean) => void = () => {
+  };
+  onChangeFolder: () => void = () => {
   };
   onPickEngine: (index: number) => void = () => {
   };
@@ -262,7 +266,9 @@ export struct SettingsPanel {
                     .fontColor(C('text_primary'))
                     .width('100%')
                     .textAlign(TextAlign.Start)
-                  Text(this.downloadAskMode ? '每次下载开始前选择文件夹' : '应用目录（自动导出到文件管理）')
+                  Text(this.downloadAskMode
+                    ? (this.downloadDirName.length > 0 ? this.downloadDirName : '未选定文件夹（下次下载时选择）')
+                    : '应用目录（自动导出到文件管理）')
                     .fontSize(Math.round(10 * getUiScale()))
                     .fontColor(C('text_tertiary'))
                     .width('100%')
@@ -279,6 +285,38 @@ export struct SettingsPanel {
               }
               .width('100%')
               .padding({ top: 11, bottom: 11 })
+
+              // 自定义文件夹模式：查看/更改授权的下载文件夹
+              if (this.downloadAskMode) {
+                Row({ space: 12 }) {
+                  Column({ space: 2 }) {
+                    Text('下载文件夹')
+                      .fontSize(ZFont.body)
+                      .fontColor(C('text_primary'))
+                      .width('100%')
+                      .textAlign(TextAlign.Start)
+                    Text(this.downloadDirName.length > 0
+                      ? '下载完成后自动保存，可在此更改'
+                      : '选择一个文件夹，下载完成后自动保存')
+                      .fontSize(Math.round(10 * getUiScale()))
+                      .fontColor(C('text_tertiary'))
+                      .width('100%')
+                      .textAlign(TextAlign.Start)
+                  }
+                  .layoutWeight(1)
+                  .alignItems(HorizontalAlign.Start)
+
+                  Text(this.downloadDirName.length > 0 ? '更改' : '去选择')
+                    .fontSize(ZFont.body)
+                    .fontColor(C('accent'))
+                    .padding({ left: 12, right: 12, top: 6, bottom: 6 })
+                    .borderRadius(ZRadius.small)
+                    .backgroundColor(C('surface_alt'))
+                    .onClick(() => this.onChangeFolder())
+                }
+                .width('100%')
+                .padding({ top: 11, bottom: 11 })
+              }
             }
             .width('100%')
             .padding({ left: 14, right: 14 })

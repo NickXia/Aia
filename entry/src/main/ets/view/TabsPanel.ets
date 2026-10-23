@@ -36,7 +36,7 @@ export struct TabsPanel {
         .width(20)
         .height(20)
         .borderRadius(6)
-        .backgroundColor(C('surface_alt'))
+        .backgroundColor(tab.incognito ? '#2E3440' : C('surface_alt'))
 
         Text(tab.isHome ? '新标签页' : (tab.title.length > 0 ? tab.title : prettyUrl(tab.url)))
           .fontSize(ZFont.footnote)
@@ -45,6 +45,15 @@ export struct TabsPanel {
           .textOverflow({ overflow: TextOverflow.Ellipsis })
           .layoutWeight(1)
           .textAlign(TextAlign.Start)
+
+        if (tab.incognito) {
+          Text('无痕')
+            .fontSize(Math.round(9 * getUiScale()))
+            .fontColor(C('surface'))
+            .padding({ left: 5, right: 5, top: 2, bottom: 2 })
+            .borderRadius(4)
+            .backgroundColor('#2E3440')
+        }
 
         Image($r('app.media.ic_close_sm'))
           .width(13)

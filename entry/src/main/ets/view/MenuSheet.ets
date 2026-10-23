@@ -36,6 +36,7 @@ export struct MenuSheet {
       new MenuEntry('home', '主页', $r('app.media.ic_home')),
       new MenuEntry('settings', '设置', $r('app.media.ic_settings')),
       new MenuEntry('downloads', '下载管理', $r('app.media.ic_download')),
+      new MenuEntry('incognito', '无痕标签', $r('app.media.ic_incognito')),
       new MenuEntry('close', '关闭标签', $r('app.media.ic_close_sm'))
     ];
   }

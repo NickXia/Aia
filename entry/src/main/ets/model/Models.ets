@@ -30,6 +30,8 @@ export class BrowserTab {
   userStopped: boolean = false;
   /** 活动主文档加载失败（WebPane 写入）：所有权在标签上，不再走 AppStorage 幽灵键（ADR-2） */
   loadFailed: boolean = false;
+  /** 无痕标签：不写历史记录；地址栏/标签卡有标识 */
+  incognito: boolean = false;
   controller: webview.WebviewController | null = null;
 
   constructor(id: string) {
@@ -78,12 +80,14 @@ export class TabInfo {
   title: string = '';
   url: string = '';
   isHome: boolean = true;
+  incognito: boolean = false;
 
-  constructor(id: string, title: string, url: string, isHome: boolean) {
+  constructor(id: string, title: string, url: string, isHome: boolean, incognito: boolean = false) {
     this.id = id;
     this.title = title;
     this.url = url;
     this.isHome = isHome;
+    this.incognito = incognito;
   }
 }
 
