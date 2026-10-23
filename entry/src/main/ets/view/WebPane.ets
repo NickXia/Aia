@@ -13,6 +13,8 @@ export struct WebPane {
   @ObjectLink tab: BrowserTab;
   /** 上次深链唤起时间：6 秒内不重复弹「打开App」确认框 */
   private lastOpenLinkAt: number = 0;
+  /** 最近一次用户真实触摸时间：深链唤起 App 的手势门槛 */
+  private lastTouchAt: number = 0;
   @Prop active: boolean;
   @Prop blockImages: boolean;
   @Prop jsEnabled: boolean;
@@ -151,7 +153,16 @@ export struct WebPane {
         // 进程调用，在内核导航回调里直接执行，遇系统「想要打开」弹窗
         // 会话会与模态互等，把 UI 线程冻死（实测知乎深链致整机无响应）。
         // 另加 6 秒冷却：B站/知乎页面会自动循环触发深链，不冷却会反复
-        // 弹系统确认框刷屏
+        // 弹系统确认框刷屏。
+        // 手势门槛：只有用户 1 秒内真实触摸过屏幕才允许唤起 App——
+        // 知乎问题页会加载后自动 location.href=zhihu:// 拉起 App 本体，
+        // 用户毫无感知就被带离浏览器（日志实证 scheme zhihu:// can=true）。
+        // 页面自己触发的深链（无触摸伴随）一律静默留在网页
+        const touched: boolean = Date.now() - this.lastTouchAt < 1000;
+        if (!touched) {
+          console.info('AiaWeb scheme blocked (no user gesture) ' + url.substring(0, 60));
+          return true;
+        }
         setTimeout(() => {
           let canOpen: boolean = false;
           try {
@@ -190,6 +201,10 @@ export struct WebPane {
           return;
         }
         this.onNewWindow(event.targetUrl);
+      })
+      // 记录用户真实触摸：深链唤起 App 的手势门槛（见 onLoadIntercept）
+      .onTouch(() => {
+        this.lastTouchAt = Date.now();
       })
       .onPageBegin(() => {
         // 占位页（about:blank）的 pageBegin 不改任何状态——
@@ -327,13 +342,6 @@ export struct WebPane {
         // 注意：onErrorReceive 也会对页面内资源（视频流/字体/CDN 媒体）触发——
         // 只有「当前主文档本身」加载失败才弹错误卡。B站视频页会自动预载
         // bilivideo.com 的 mp4 流，失败若误判会让渲染完好的页面被蒙上错误卡
-        // 下载型导航（onBeforeDownload 已接管）主帧不渲染页面，内核可能
-        // 补发主文档错误——这不是网页失败，10 秒窗口内的错误一律忽略
-        const dlAt: number = AppStorage.get<number>('dlNavAt') ?? 0;
-        if (dlAt > 0 && Date.now() - dlAt < 10000) {
-          console.info('AiaWeb errorReceive (downloadNav, ignored)');
-          return;
-        }
         try {
           const errUrl: string = event !== undefined ? event.request.getRequestUrl() : '';
           const errLower: string = errUrl.toLowerCase();
@@ -364,6 +372,20 @@ export struct WebPane {
         if (this.active) {
           AppStorage.setOrCreate<boolean>('loadFailed', true);
         }
+      })
+      // 网页全屏（知乎/微博视频横幅自动播放会请求）会把 Web 组件撑满
+      // 整个窗口盖住 Aia 工具栏，且系统返回退不出——用户被困在网页里。
+      // 一律立即退出全屏，工具栏永远可见（代价：页内视频全屏按钮无效）
+      .onFullScreenEnter((event: FullScreenEnterEvent) => {
+        console.info('AiaWeb fullscreenEnter -> force exit');
+        try {
+          event.handler.exitFullScreen();
+        } catch (err) {
+          // ignore
+        }
+      })
+      .onFullScreenExit(() => {
+        console.info('AiaWeb fullscreenExit');
       })
       .visibility(this.active ? Visibility.Visible : Visibility.None);
     }

@@ -996,18 +996,10 @@ struct Index {
         WebPendingAction.set(d.guid, 'cancel');
       }
       if (delFiles && d.path.length > 0) {
-        try {
-          fileIo.unlinkSync(d.path); // 沙箱路径与 file:// uri 均可删除
-        } catch (err) {
-          // 文件可能已被移动或删除
-        }
+        this.deleteFileAny(d.path); // 沙箱路径与选择器 uri 统一走降级删除
       }
       if (delFiles && d.publicUri.length > 0) {
-        try {
-          fileIo.unlinkSync(d.publicUri);
-        } catch (err) {
-          // 公共副本删除失败不影响记录
-        }
+        this.deleteFileAny(d.publicUri); // 公共副本删除失败不影响记录
       }
     }
     this.downloads = [];
@@ -1083,6 +1075,41 @@ struct Index {
     });
   }
 
+  /**
+   * 尽力删除任意路径/uri 的文件，返回是否真正删除。
+   * 坑：选择器 uri（用户选的目录里的文件）直接 unlinkSync 常因权限
+   * 失败且异常被上层吞掉——表现为「删了记录但文件还在」。降级方案：
+   * 打开 fd 后 TRUNC 截断为 0（内容清掉，占位符留空壳）。
+   */
+  private deleteFileAny(path: string): boolean {
+    if (path.length === 0) {
+      return false;
+    }
+    try {
+      fileIo.unlinkSync(path);
+      return true;
+    } catch (err) {
+      // 继续降级
+    }
+    let fd: number = -1;
+    try {
+      const f = fileIo.openSync(path, fileIo.OpenMode.READ_WRITE | fileIo.OpenMode.TRUNC);
+      fd = f.fd;
+      fileIo.closeSync(fd);
+      fd = -1;
+      return false; // 截断成功但未真正删除
+    } catch (err) {
+      if (fd >= 0) {
+        try {
+          fileIo.closeSync(fd);
+        } catch (e) {
+          // ignore
+        }
+      }
+      return false; // 连打开都失败：权限不够或已不存在
+    }
+  }
+
   /** 执行单条删除：delFile=true 时连沙箱原件与公共副本一起删 */
   private removeDownloadRecord(guid: string, delFile: boolean = false): void {
     let target: DownloadItem | null = null;
@@ -1096,23 +1123,21 @@ struct Index {
     }
     this.liveItems.delete(guid);
     this.preTargets.delete(guid);
+    let fileGone: boolean = true;
     if (delFile && target !== null) {
-      try {
-        fileIo.unlinkSync(target.path); // 沙箱路径与 file:// uri 均可删
-      } catch (err) {
-        // 文件可能已被移动或删除
-      }
+      fileGone = this.deleteFileAny(target.path); // 沙箱路径与 file:// uri 均尝试
       if (target.publicUri.length > 0 && target.publicUri !== target.path) {
-        try {
-          fileIo.unlinkSync(target.publicUri);
-        } catch (err) {
-          // 公共副本删除失败不影响记录删除
-        }
+        const pubGone: boolean = this.deleteFileAny(target.publicUri);
+        fileGone = fileGone || pubGone;
       }
     }
     this.downloads = rest;
     AiaStore.saveDownloads(this.downloads);
-    promptAction.showToast({ message: delFile ? '已删除记录和文件' : '已删除记录' });
+    if (!delFile) {
+      promptAction.showToast({ message: '已删除记录' });
+    } else {
+      promptAction.showToast({ message: fileGone ? '已删除记录和文件' : '记录已删除，文件暂无权限移除（已清空内容）' });
+    }
   }
 
   /** 危险操作二次确认：确认后执行 confirm()，取消不动作 */
@@ -1389,11 +1414,15 @@ struct Index {
       }
 
       Column() {
-        AddressBar({
-          tab: this.activeTab(),
-          home: this.showHome,
-          onSubmit: (text: string) => this.navigate(text)
-        })
+        // 首页隐藏顶部地址栏（Via 式）：首页有自己的居中搜索框，
+        // 顶部栏只在网页态出现
+        if (!this.showHome) {
+          AddressBar({
+            tab: this.activeTab(),
+            home: this.showHome,
+            onSubmit: (text: string) => this.navigate(text)
+          })
+        }
 
         Stack() {
           ForEach(this.tabs, (tab: BrowserTab) => {

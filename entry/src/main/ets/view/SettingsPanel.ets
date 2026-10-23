@@ -262,7 +262,7 @@ export struct SettingsPanel {
                     .fontColor(C('text_primary'))
                     .width('100%')
                     .textAlign(TextAlign.Start)
-                  Text(this.downloadAskMode ? '每次下载开始前选择文件夹' : '应用目录（自动导出到文件管理）')
+                  Text(this.downloadAskMode ? '每次下载完成后选择保存位置' : '应用目录（自动导出到文件管理）')
                     .fontSize(Math.round(10 * getUiScale()))
                     .fontColor(C('text_tertiary'))
                     .width('100%')
