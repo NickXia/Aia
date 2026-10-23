@@ -648,10 +648,11 @@ struct Index {
     this.tabsVisible = false;
   }
 
-  /** 网页 target=_blank 的新窗口：在新标签打开并立即激活 */
-  private openInNewTab(url: string): void {
+  /** 网页 target=_blank 的新窗口：在新标签打开并立即激活；无痕标签里弹出的新窗口继承无痕 */
+  private openInNewTab(url: string, incognito: boolean): void {
     console.info('AiaNav openInNewTab ' + url);
     const tab: BrowserTab = this.newTab();
+    tab.incognito = incognito;
     tab.url = url;
     // 导航状态与 navigate() 对齐：lastNavTime 不补会恒触发看门狗重试
     tab.lastNavTime = Date.now();
@@ -1659,7 +1660,7 @@ struct Index {
               downloadDelegate: this.downloadDelegate,
               onPageStart: (t: BrowserTab) => this.handlePageStart(t),
               onPageFinished: (t: BrowserTab) => this.handlePageFinished(t),
-              onNewWindow: (url: string) => this.openInNewTab(url)
+              onNewWindow: (url: string, incognito: boolean) => this.openInNewTab(url, incognito)
             })
           }, (tab: BrowserTab) => tab.id)
 

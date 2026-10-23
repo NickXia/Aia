@@ -56,8 +56,8 @@ export struct WebPane {
   };
   onPageFinished: (tab: BrowserTab) => void = () => {
   };
-  /** 网页请求的新窗口（target=_blank，如知乎推文/B站视频卡）：交给宿主开新标签 */
-  onNewWindow: (url: string) => void = () => {
+  /** 网页请求的新窗口（target=_blank，如知乎推文/B站视频卡）：交给宿主开新标签；第二参继承无痕标志 */
+  onNewWindow: (url: string, incognito: boolean) => void = () => {
   };
 
   private controller: webview.WebviewController = new webview.WebviewController();
@@ -99,7 +99,9 @@ export struct WebPane {
       // 背景必须透明：空白页/主页态透出宣纸底或自定义背景图，
       // 且不能对 Web 使用 visibility None 隐藏——隐藏态创建的 ArkWeb
       // 内核会初始化失败（browser is null），导致导航随机挂起
-      Web({ src: 'about:blank', controller: this.controller })
+      // incognitoMode：内核级无痕——Cookie/缓存/localStorage 走内存态，
+      // 标签销毁即丢弃，与普通标签完全隔离（关闭无痕标签后无需登录态残留）
+      Web({ src: 'about:blank', controller: this.controller, incognitoMode: this.tab.incognito })
       .width('100%')
       .height('100%')
       .backgroundColor(Color.Transparent)
@@ -209,7 +211,9 @@ export struct WebPane {
         if (event.isAlert || !event.isUserTrigger || event.targetUrl.length === 0) {
           return;
         }
-        this.onNewWindow(event.targetUrl);
+        // 无痕标签里 target=_blank 开出的新标签必须继承无痕——否则无痕页
+        // 登录态经新窗口落进普通标签的持久存储，隔离被击穿
+        this.onNewWindow(event.targetUrl, this.tab.incognito);
       })
       // 记录用户真实触摸：深链唤起 App 的手势门槛（见 onLoadIntercept）
       .onTouch(() => {
