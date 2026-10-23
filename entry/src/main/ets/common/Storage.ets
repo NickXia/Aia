@@ -273,6 +273,7 @@ export class AiaStore {
         d.received = typeof o['received'] === 'number' ? o['received'] as number : 0;
         d.state = (o['state'] as string) === 'progressing' ? 'failed' : o['state'] as string;
         d.time = typeof o['time'] === 'number' ? o['time'] as number : 0;
+        d.publicUri = typeof o['publicUri'] === 'string' ? o['publicUri'] as string : '';
         result.push(d);
       }
     } catch (err) {
@@ -287,7 +288,8 @@ export class AiaStore {
       const d = list[i];
       const o: Record<string, string | number> = {
         'guid': d.guid, 'url': d.url, 'fileName': d.fileName, 'path': d.path,
-        'total': d.total, 'received': d.received, 'state': d.state, 'time': d.time
+        'total': d.total, 'received': d.received, 'state': d.state, 'time': d.time,
+        'publicUri': d.publicUri
       };
       raw.push(o);
     }

@@ -104,7 +104,7 @@ export struct DownloadsPanel {
           .edgeEffect(EdgeEffect.Spring)
         }
 
-        Text('文件保存在应用目录 downloads 文件夹内')
+        Text('应用目录模式：文件在应用 downloads 文件夹内；询问模式：下载前自选文件夹')
           .fontSize(Math.round(10 * getUiScale()))
           .fontColor(C('text_tertiary'))
           .width('100%')

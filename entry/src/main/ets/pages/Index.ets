@@ -107,12 +107,16 @@ struct Index {
     AppStorage.setOrCreate<webview.WebDownloadDelegate>('downloadDelegate', this.downloadDelegate);
     this.downloadDelegate.onBeforeDownload((item: webview.WebDownloadItem) => {
       const guid: string = item.getGuid();
-      // 第一时间标记「这是下载型导航」：内核检测到附件后会立刻补发
-      // 主文档错误/不派发 pageBegin，必须先于一切 UI 判断设好窗口标记
+      // 第一时间标记「这是下载型导航」：内核检测到附件后会立刻/延迟补发
+      // 主文档错误（实测选择器开着 25 秒后仍会补发）、不派发 pageBegin。
+      // dlPicking=选择器存活期间无条件忽略；dlNavAt=start 后 10 秒窗口
       AppStorage.setOrCreate<number>('dlNavAt', Date.now());
+      AppStorage.setOrCreate<boolean>('dlPicking', true);
       const url: string = item.getUrl();
       let name: string = url.substring(url.lastIndexOf('/') + 1).split('?')[0];
-      if (name.length === 0) {
+      // 文件名白名单清洗：去路径穿越/非法字符（审查 #11），保留常用安全字符
+      name = name.replace(/[^0-9A-Za-z._\-\u4e00-\u9fa5]/g, '_');
+      if (name.length === 0 || name === '.' || name === '..') {
         name = 'download_' + Date.now();
       }
       const dir: string = getContext(this).filesDir + '/downloads';
@@ -132,9 +136,8 @@ struct Index {
       const startNow = (): void => {
         item.start(path);
         self.liveItems.set(guid, item);
-        // 下载型导航：主帧不会渲染页面也不会派发 pageBegin——
-        // 标记 pageBeginSeen 让看门狗跳过，结束加载圈，并给
-        // WebPane 的 errorReceive 一个 10 秒忽略窗口
+        // 下载真正开始：结束选择器态，改用 start 后 10 秒错误忽略窗口
+        AppStorage.setOrCreate<boolean>('dlPicking', false);
         AppStorage.setOrCreate<number>('dlNavAt', Date.now());
         for (let t = 0; t < self.tabs.length; t++) {
           if (self.tabs[t].id === self.activeId) {
@@ -168,6 +171,7 @@ struct Index {
                 startNow();
               } else {
                 // 用户主动取消选择：取消下载任务，不偷偷下到应用目录
+                AppStorage.setOrCreate<boolean>('dlPicking', false);
                 try {
                   item.cancel();
                 } catch (err) {
@@ -280,24 +284,36 @@ struct Index {
       if (AiaStore.downloadAskMode) {
         // 用户自定义模式：弹出系统保存对话框，可浏览/新建目录选择保存位置
         // 注意：delegate 回调可能不在 UI 线程，picker 必须 setTimeout 调度回主线程
-        const idx: number = doneIdx;
+        // 竞态防护：picker 是异步的，回调执行时用户可能已删除/清空记录——
+        // 绝不能按捕获时的数组下标访问（越界或错条目），必须按 guid 重新查找
+        const finGuid2: string = finGuid;
         setTimeout(() => {
           try {
             const pickerInst = new picker.DocumentViewPicker();
+            const cur: DownloadItem | undefined =
+              this.downloads.find((d: DownloadItem) => d.guid === finGuid2);
+            if (cur === undefined) {
+              return; // 记录已被用户删除，无需导出
+            }
             const opt: picker.DocumentSaveOptions = {
-              newFileNames: [this.downloads[idx].fileName]
+              newFileNames: [cur.fileName]
             };
                 pickerInst.save(opt).then((newUris: Array<string>) => {
+                // 按 guid 再次查找：用户可能在 picker 弹窗期间又动了记录
+                const i: number = this.downloads.findIndex((d: DownloadItem) => d.guid === finGuid2);
+                if (i < 0) {
+                  return;
+                }
                 if (newUris.length > 0) {
-                  this.downloads[idx].publicUri = newUris[0];
+                  this.downloads[i].publicUri = newUris[0];
                   try {
-                    fileIo.copyFileSync(this.downloads[idx].path, newUris[0]);
+                    fileIo.copyFileSync(this.downloads[i].path, newUris[0]);
                     try {
-                      fileIo.unlinkSync(this.downloads[idx].path); // 已移到用户选的位置
+                      fileIo.unlinkSync(this.downloads[i].path); // 已移到用户选的位置
                     } catch (err) {
                       // ignore
                     }
-                    this.downloads[idx].path = newUris[0];
+                    this.downloads[i].path = newUris[0];
                     promptAction.showToast({ message: '已保存到你选择的位置' });
                   } catch (err) {
                     promptAction.showToast({ message: '保存失败，文件保留在应用目录' });
@@ -318,23 +334,32 @@ struct Index {
       }
       // 应用目录模式：自动导出公共 Download（Chrome 式）
       try {
+        const curAuto: DownloadItem | undefined =
+          this.downloads.find((d: DownloadItem) => d.guid === finGuid);
+        if (curAuto === undefined) {
+          return;
+        }
         const pickerInst = new picker.DocumentViewPicker();
         const opt: picker.DocumentSaveOptions = {
-          newFileNames: [this.downloads[doneIdx].fileName],
+          newFileNames: [curAuto.fileName],
           pickerMode: picker.DocumentPickerMode.DOWNLOAD
         };
-        const idx2: number = doneIdx;
         pickerInst.save(opt).then((newUris: Array<string>) => {
           if (newUris.length > 0) {
-            this.downloads[idx2].publicUri = newUris[0];
+            // 按 guid 重新查找，防回调执行期间记录被删/被清空
+            const i2: number = this.downloads.findIndex((d: DownloadItem) => d.guid === finGuid);
+            if (i2 < 0) {
+              return;
+            }
+            this.downloads[i2].publicUri = newUris[0];
             try {
-              fileIo.copyFileSync(this.downloads[idx2].path, newUris[0]);
+              fileIo.copyFileSync(this.downloads[i2].path, newUris[0]);
               try {
-                fileIo.unlinkSync(this.downloads[idx2].path); // 已移到 Download，不留双份
+                fileIo.unlinkSync(this.downloads[i2].path); // 已移到 Download，不留双份
               } catch (err) {
                 // ignore
               }
-              this.downloads[idx2].path = newUris[0];
+              this.downloads[i2].path = newUris[0];
             } catch (err) {
               // 移动失败保留沙箱原件，文件至少在 Download 有一份
             }
@@ -359,6 +384,15 @@ struct Index {
         }
         this.preTargets.delete(item.getGuid());
       }
+      // 清掉沙箱里部分写入的半截文件（审查发现 #3：磁盘只增不减）
+      try {
+        const p: string = item.getFullPath();
+        if (p.length > 0) {
+          fileIo.unlinkSync(p);
+        }
+      } catch (err) {
+        // 文件可能已被取消路径清理过
+      }
       for (let i = 0; i < this.downloads.length; i++) {
         if (this.downloads[i].guid === item.getGuid()) {
           this.downloads[i].state = 'failed';
@@ -369,7 +403,8 @@ struct Index {
     });
     // 空白页看门狗：任何未知路径把应用留在占位页超过 1.6 秒，自动回主页。
     // 覆盖系统边缘返回手势等无法穷举的时序，保证用户永远不会面对白屏。
-    setInterval(() => this.blankWatchdog(), 700);
+    // 1.2s 间隔：轮询里含同步 getUrl（IPC），700ms 在低端机有掉帧风险（审查 #6）
+    setInterval(() => this.blankWatchdog(), 1200);
     // 全屏布局下按系统避让高度留白（px -> vp）
     const topPx: number = AppStorage.get<number>('topAvoidPx') ?? 0;
     const bottomPx: number = AppStorage.get<number>('bottomAvoidPx') ?? 0;
@@ -692,6 +727,7 @@ struct Index {
     try {
       if (tab.isLoading) {
         tab.controller.stop();
+        tab.userStopped = true; // 用户主动停止：看门狗不得自动重试/判失败
       } else {
         tab.controller.refresh();
       }
@@ -906,6 +942,15 @@ struct Index {
     for (let i = 0; i < this.downloads.length; i++) {
       if (this.downloads[i].guid === guid) {
         this.downloads[i].state = 'canceled';
+        // 清掉沙箱里部分写入的半截文件：取消后的文件无用，
+        // 不删则磁盘只增不减（审查发现 #3）
+        try {
+          if (this.downloads[i].path.length > 0) {
+            fileIo.unlinkSync(this.downloads[i].path);
+          }
+        } catch (err) {
+          // 内核可能还在写，删除失败则保留（下载失败回调会再清理）
+        }
         break;
       }
     }
@@ -1045,7 +1090,15 @@ struct Index {
     for (let i = 0; i < this.downloads.length; i++) {
       if (this.downloads[i].guid === guid) {
         name = this.downloads[i].fileName;
+        // done 必有文件；取消/失败也可能留了半截文件（access 检测真实存在）
         hasFile = this.downloads[i].state === 'done';
+        if (!hasFile && this.downloads[i].path.length > 0) {
+          try {
+            hasFile = fileIo.accessSync(this.downloads[i].path);
+          } catch (err) {
+            hasFile = false;
+          }
+        }
         break;
       }
     }
@@ -1136,7 +1189,14 @@ struct Index {
     if (!delFile) {
       promptAction.showToast({ message: '已删除记录' });
     } else {
-      promptAction.showToast({ message: fileGone ? '已删除记录和文件' : '记录已删除，文件暂无权限移除（已清空内容）' });
+      promptAction.showToast({ message: fileGone ? '已删除记录和文件' : '已删除记录，文件内容已清空' });
+      if (!fileGone) {
+        // 系统限制：应用对用户所选文件夹里的文件只有读写权、无删除权，
+        // 只能截断为 0B；彻底删除需用户在系统「文件管理」中操作
+        setTimeout(() => {
+          promptAction.showToast({ message: '因系统权限限制无法直接删除，请在文件管理中手动删除该 0B 文件' });
+        }, 2300);
+      }
     }
   }
 
@@ -1434,6 +1494,7 @@ struct Index {
               doNotTrack: this.dnt,
               desktopUA: this.desktopUA,
               readingTheme: this.readingTheme,
+              debugH5: this.debugH5,
               onPageStart: (t: BrowserTab) => this.handlePageStart(t),
               onPageFinished: (t: BrowserTab) => this.handlePageFinished(t),
               onNewWindow: (url: string) => this.openInNewTab(url)
@@ -1680,15 +1741,27 @@ struct Index {
 /** 挂起的下载动作队列：UI 面板发起，delegate 的下一次 onDownloadUpdated 消费 */
 export class WebPendingAction {
   static map: Map<string, string> = new Map();
+  static ts: Map<string, number> = new Map();
 
   static set(guid: string, action: string): void {
+    // 顺带清理 60 秒前的残留：item 已死时动作永无人消费，条目会永久残留（审查 #9）
+    const now: number = Date.now();
+    WebPendingAction.map.forEach((v: string, k: string) => {
+      const t: number | undefined = WebPendingAction.ts.get(k);
+      if (t !== undefined && now - t > 60000) {
+        WebPendingAction.map.delete(k);
+        WebPendingAction.ts.delete(k);
+      }
+    });
     WebPendingAction.map.set(guid, action);
+    WebPendingAction.ts.set(guid, now);
   }
 
   static consume(guid: string): string {
     const a: string | undefined = WebPendingAction.map.get(guid);
     if (a !== undefined) {
       WebPendingAction.map.delete(guid);
+      WebPendingAction.ts.delete(guid);
     }
     return a === undefined ? '' : a;
   }

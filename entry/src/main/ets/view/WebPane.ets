@@ -1,5 +1,6 @@
 import { webview } from '@kit.ArkWeb';
 import { common, bundleManager } from '@kit.AbilityKit';
+import { promptAction } from '@kit.ArkUI';
 import { BrowserTab } from '../model/Models';
 import { hostOf } from '../common/UrlUtils';
 
@@ -15,10 +16,14 @@ export struct WebPane {
   private lastOpenLinkAt: number = 0;
   /** 最近一次用户真实触摸时间：深链唤起 App 的手势门槛 */
   private lastTouchAt: number = 0;
+  /** 最近一次「深链被拦截」提示时间：独立冷却防 toast 刷屏 */
+  private lastBlockToastAt: number = 0;
   @Prop active: boolean;
   @Prop blockImages: boolean;
   @Prop jsEnabled: boolean;
   @Prop doNotTrack: boolean;
+  /** 开发者调试开关：控制诊断探针（每次页面加载的 JS 注入有常驻成本） */
+  @Prop debugH5: boolean = false;
   /** 阅读模式（羊皮卷）：给网页内容注入暖色滤镜 */
   @Prop readingTheme: boolean;
   /** 桌面版 UA：切换后对当前 Web 上下文生效 */
@@ -160,7 +165,13 @@ export struct WebPane {
         // 页面自己触发的深链（无触摸伴随）一律静默留在网页
         const touched: boolean = Date.now() - this.lastTouchAt < 1000;
         if (!touched) {
-          console.info('AiaWeb scheme blocked (no user gesture) ' + url.substring(0, 60));
+          console.info('AiaWeb scheme blocked (no user gesture) ' + url.split('?')[0].substring(0, 60));
+          // 一次性提示：让用户知道"打开App"被留在网页内了（独立冷却防刷屏，
+          // 不与 openLink 冷却共用——否则会误伤紧随其后的正常唤起）
+          if (Date.now() - this.lastBlockToastAt > 6000) {
+            this.lastBlockToastAt = Date.now();
+            promptAction.showToast({ message: '已在网页内打开（未跳转外部应用）' });
+          }
           return true;
         }
         setTimeout(() => {
@@ -170,7 +181,7 @@ export struct WebPane {
           } catch (err) {
             console.info('AiaWeb scheme queryFail ' + url);
           }
-          console.info('AiaWeb scheme ' + url.substring(0, 80) + ' can=' + canOpen);
+          console.info('AiaWeb scheme ' + url.split('?')[0].substring(0, 60) + ' can=' + canOpen);
           if (canOpen && Date.now() - this.lastOpenLinkAt > 6000) {
             this.lastOpenLinkAt = Date.now();
             try {
@@ -270,17 +281,20 @@ export struct WebPane {
         } catch (err) {
           // 页面销毁瞬间可能取不到状态
         }
-        // 诊断：主文档真实内容量（排查"秒回空文档"白屏）
-        try {
-          this.controller.runJavaScriptExt(
-            "document.body ? String(document.body.innerText.length) + '|' + document.contentType + '|' + document.readyState : 'noBody'")
-            .then((r: webview.JsMessageExt) => {
-              console.info('AiaWeb doc ' + current + ' => ' + r.getString());
-            }).catch((e: Error) => {
-            console.info('AiaWeb doc probe fail');
-          });
-        } catch (err) {
-          // ignore
+        // 诊断：主文档真实内容量（排查"秒回空文档"白屏）——
+        // 仅开发者模式启用：每次页面加载一次跨进程 JS 注入，线上常驻是开销
+        if (this.debugH5) {
+          try {
+            this.controller.runJavaScriptExt(
+              "document.body ? String(document.body.innerText.length) + '|' + document.contentType + '|' + document.readyState : 'noBody'")
+              .then((r: webview.JsMessageExt) => {
+                console.info('AiaWeb doc ' + current.split('?')[0] + ' => ' + r.getString());
+              }).catch((e: Error) => {
+              console.info('AiaWeb doc probe fail');
+            });
+          } catch (err) {
+            // ignore
+          }
         }
 
         if (current === 'about:blank' || current.length === 0) {
@@ -339,6 +353,16 @@ export struct WebPane {
       // 报错页（登录墙、断网等）不会触发 onPageEnd，必须在这里结束加载状态，
       // 否则进度条会永远卡住
       .onErrorReceive((event?: OnErrorReceiveEvent) => {
+        // 下载型导航（onBeforeDownload 已接管）主帧不渲染页面，内核可能
+        // 对未渲染的主文档补发错误——选择器存活期间（dlPicking）无条件忽略
+        // （实测用户在选择器停留 25 秒后内核仍会补发，10 秒窗口不够）；
+        // start 后 10 秒窗口（dlNavAt）内的补发同样忽略
+        const dlAt: number = AppStorage.get<number>('dlNavAt') ?? 0;
+        const picking: boolean = AppStorage.get<boolean>('dlPicking') ?? false;
+        if (picking || (dlAt > 0 && Date.now() - dlAt < 10000)) {
+          console.info('AiaWeb errorReceive (downloadNav, ignored)');
+          return;
+        }
         // 注意：onErrorReceive 也会对页面内资源（视频流/字体/CDN 媒体）触发——
         // 只有「当前主文档本身」加载失败才弹错误卡。B站视频页会自动预载
         // bilivideo.com 的 mp4 流，失败若误判会让渲染完好的页面被蒙上错误卡
@@ -373,16 +397,21 @@ export struct WebPane {
           AppStorage.setOrCreate<boolean>('loadFailed', true);
         }
       })
-      // 网页全屏（知乎/微博视频横幅自动播放会请求）会把 Web 组件撑满
-      // 整个窗口盖住 Aia 工具栏，且系统返回退不出——用户被困在网页里。
-      // 一律立即退出全屏，工具栏永远可见（代价：页内视频全屏按钮无效）
+      // 网页全屏请求手势门槛化：用户点视频全屏按钮必伴随触摸（1 秒内）
+      // → 放行；页面自动请求的横幅全屏（无手势）会把 Web 撑满整窗盖住
+      // Aia 工具栏且系统返回退不出（实测知乎视频横幅）→ 立即拒绝
       .onFullScreenEnter((event: FullScreenEnterEvent) => {
-        console.info('AiaWeb fullscreenEnter -> force exit');
-        try {
-          event.handler.exitFullScreen();
-        } catch (err) {
-          // ignore
+        const touched: boolean = Date.now() - this.lastTouchAt < 1000;
+        if (!touched) {
+          console.info('AiaWeb fullscreenEnter -> reject (no user gesture)');
+          try {
+            event.handler.exitFullScreen();
+          } catch (err) {
+            // ignore
+          }
+          return;
         }
+        console.info('AiaWeb fullscreenEnter -> allow (user gesture)');
       })
       .onFullScreenExit(() => {
         console.info('AiaWeb fullscreenExit');
