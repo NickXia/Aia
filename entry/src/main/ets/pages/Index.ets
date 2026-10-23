@@ -67,6 +67,12 @@ struct Index {
   @State debugH5: boolean = AiaStore.debugH5;
   @State downloadAskMode: boolean = AiaStore.downloadAskMode;
   private downloadDelegate: webview.WebDownloadDelegate = new webview.WebDownloadDelegate();
+  // 进行中下载的活引用表：pause/resume 必须在 item 对象上直接调用。
+  // 不能走「队列 + 等 onDownloadUpdated 消费」——暂停后内核不再派发
+  // updated 回调，队列里的 resume 永远没人消费，任务就永远卡在暂停态
+  private liveItems: Map<string, webview.WebDownloadItem> = new Map();
+  // 「下载前询问」模式：开始下载前用户选定的目标 uri（guid -> uri）
+  private preTargets: Map<string, string> = new Map();
   // delegate 本体在 Index 管理（状态/持久化都在这），WebPane 创建内核时
   // 通过 AppStorage 取到并 controller.setDownloadDelegate 注册——
   // 此前漏了注册这一步，网页下载事件无人接收
@@ -100,6 +106,10 @@ struct Index {
     // delegate 通过 AppStorage 共享给各 WebPane（内核创建时 setDownloadDelegate 注册）
     AppStorage.setOrCreate<webview.WebDownloadDelegate>('downloadDelegate', this.downloadDelegate);
     this.downloadDelegate.onBeforeDownload((item: webview.WebDownloadItem) => {
+      const guid: string = item.getGuid();
+      // 第一时间标记「这是下载型导航」：内核检测到附件后会立刻补发
+      // 主文档错误/不派发 pageBegin，必须先于一切 UI 判断设好窗口标记
+      AppStorage.setOrCreate<number>('dlNavAt', Date.now());
       const url: string = item.getUrl();
       let name: string = url.substring(url.lastIndexOf('/') + 1).split('?')[0];
       if (name.length === 0) {
@@ -112,42 +122,100 @@ struct Index {
         // 目录已存在
       }
       const path: string = dir + '/' + name;
-      const d: DownloadItem = new DownloadItem(item.getGuid(), url, name, path);
+      const d: DownloadItem = new DownloadItem(guid, url, name, path);
       const list: DownloadItem[] = this.downloads.slice();
       list.unshift(d);
       this.downloads = AiaStore.trimDownloads(list);
       AiaStore.saveDownloads(this.downloads);
-      item.start(path);
-      promptAction.showToast({ message: '开始下载：' + name });
-      // 首次下载：询问用户偏好的保存位置（仅一次，调度回主线程弹窗）
-      if (!AiaStore.downloadAsked) {
-        AiaStore.downloadAsked = true;
-        setTimeout(() => {
-        this.getUIContext().showAlertDialog({
-          title: '下载位置',
-          message: '文件默认保存在应用目录（可在下载管理中打开/导出）。是否改为每次下载时选择保存位置，便于自己查找？',
-          autoCancel: true,
-          alignment: DialogAlignment.Center,
-          primaryButton: {
-            value: '应用目录（推荐）',
-            fontColor: C('accent'),
-            action: () => {
-              AiaStore.downloadAskMode = false;
-            }
-          },
-          secondaryButton: {
-            value: '每次下载时询问',
-            fontColor: '#B4552E',
-            action: () => {
-              AiaStore.downloadAskMode = true;
-              promptAction.showToast({ message: '已开启：每次下载完成后可选择保存位置' });
-            }
+      const askMode: boolean = AiaStore.downloadAskMode;
+      const self = this;
+      const startNow = (): void => {
+        item.start(path);
+        self.liveItems.set(guid, item);
+        // 下载型导航：主帧不会渲染页面也不会派发 pageBegin——
+        // 标记 pageBeginSeen 让看门狗跳过，结束加载圈，并给
+        // WebPane 的 errorReceive 一个 10 秒忽略窗口
+        AppStorage.setOrCreate<number>('dlNavAt', Date.now());
+        for (let t = 0; t < self.tabs.length; t++) {
+          if (self.tabs[t].id === self.activeId) {
+            self.tabs[t].pageBeginSeen = true;
+            self.tabs[t].isLoading = false;
+            self.tabs[t].progress = 100;
+            break;
           }
-        });
-        }, 50);
+        }
+        promptAction.showToast({ message: '开始下载：' + name });
+      };
+      if (askMode) {
+        // 下载开始前先让用户选保存位置和文件名（不再等下载完才问）。
+        // item.start 只接受沙箱路径，故先落到应用临时目录，
+        // 完成后自动搬移到所选位置（见 onDownloadFinish）
+        setTimeout(() => {
+          try {
+            const pickerInst = new picker.DocumentViewPicker();
+            const opt: picker.DocumentSaveOptions = {
+              newFileNames: [name]
+            };
+            pickerInst.save(opt).then((uris: Array<string>) => {
+              if (uris.length > 0) {
+                self.preTargets.set(guid, uris[0]);
+                self.downloads.forEach((it: DownloadItem, idx: number) => {
+                  if (it.guid === guid) {
+                    self.downloads[idx].fileName = uris[0].substring(uris[0].lastIndexOf('/') + 1);
+                  }
+                });
+                AiaStore.saveDownloads(self.downloads);
+                startNow();
+              } else {
+                // 用户主动取消选择：取消下载任务，不偷偷下到应用目录
+                try {
+                  item.cancel();
+                } catch (err) {
+                  // ignore
+                }
+                self.liveItems.delete(guid);
+                self.downloads.forEach((it: DownloadItem, idx: number) => {
+                  if (it.guid === guid) {
+                    self.downloads[idx].state = 'canceled';
+                  }
+                });
+                AiaStore.saveDownloads(self.downloads);
+                promptAction.showToast({ message: '已取消下载' });
+              }
+            }).catch((e: BusinessError) => {
+              console.info('AiaDL prePick fail code=' + e.code);
+              startNow(); // 选择器异常不阻塞下载，落到应用目录
+            });
+          } catch (err) {
+            startNow();
+          }
+        }, 30);
+        // 首次下载：询问用户偏好的保存位置（仅一次）
+        if (!AiaStore.downloadAsked) {
+          AiaStore.downloadAsked = true;
+          setTimeout(() => {
+            self.getUIContext().showAlertDialog({
+              title: '下载位置',
+              message: '已开启「每次下载前选择位置」：每次下载开始前会弹出文件夹选择器。可在设置中改回应用目录模式。',
+              autoCancel: true,
+              alignment: DialogAlignment.Center,
+              primaryButton: {
+                value: '知道了',
+                fontColor: C('accent'),
+                action: () => {
+                }
+              }
+            });
+          }, 800);
+        }
+        return;
       }
+      startNow();
     });
     this.downloadDelegate.onDownloadUpdated((item: webview.WebDownloadItem) => {
+      // 记录最新 item 活引用：暂停后内核不再发 updated 回调，
+      // 恢复必须直接在此引用上调用（见 pauseResumeDownload）
+      this.liveItems.set(item.getGuid(), item);
       for (let i = 0; i < this.downloads.length; i++) {
         if (this.downloads[i].guid === item.getGuid()) {
           this.downloads[i].received = item.getReceivedBytes();
@@ -170,9 +238,10 @@ struct Index {
       }
     });
     this.downloadDelegate.onDownloadFinish((item: webview.WebDownloadItem) => {
+      const finGuid: string = item.getGuid();
       let doneIdx: number = -1;
       for (let i = 0; i < this.downloads.length; i++) {
-        if (this.downloads[i].guid === item.getGuid()) {
+        if (this.downloads[i].guid === finGuid) {
           this.downloads[i].state = 'done';
           this.downloads[i].received = item.getTotalBytes();
           this.downloads[i].total = item.getTotalBytes();
@@ -180,6 +249,28 @@ struct Index {
           doneIdx = i;
           break;
         }
+      }
+      this.liveItems.delete(finGuid);
+      // 「下载前询问」模式：用户在下载开始前已选定位置——
+      // 直接搬移过去，不再弹任何对话框
+      const target: string | undefined = this.preTargets.get(finGuid);
+      if (target !== undefined && doneIdx >= 0) {
+        this.preTargets.delete(finGuid);
+        try {
+          fileIo.copyFileSync(this.downloads[doneIdx].path, target);
+          try {
+            fileIo.unlinkSync(this.downloads[doneIdx].path);
+          } catch (err) {
+            // ignore
+          }
+          this.downloads[doneIdx].path = target;
+          this.downloads[doneIdx].publicUri = target;
+          promptAction.showToast({ message: '已保存到所选位置' });
+        } catch (err) {
+          promptAction.showToast({ message: '搬移到所选位置失败，文件在应用目录' });
+        }
+        AiaStore.saveDownloads(this.downloads);
+        return;
       }
       AiaStore.saveDownloads(this.downloads);
       // 自动导出到公共 Download（Chrome 式）：DOWNLOAD 模式系统直接落盘文件管理
@@ -257,6 +348,8 @@ struct Index {
       promptAction.showToast({ message: '下载完成，已保存到文件管理' });
     });
     this.downloadDelegate.onDownloadFailed((item: webview.WebDownloadItem) => {
+      this.liveItems.delete(item.getGuid());
+      this.preTargets.delete(item.getGuid());
       for (let i = 0; i < this.downloads.length; i++) {
         if (this.downloads[i].guid === item.getGuid()) {
           this.downloads[i].state = 'failed';
@@ -754,10 +847,6 @@ struct Index {
 
   // ------------------------------------------------------------ 下载管理
   private pauseResumeDownload(guid: string, toPause: boolean): void {
-    const delegate = this.downloadDelegate;
-    // 通过 WebDownloadManager 查找活动任务进行暂停/继续：
-    // ArkWeb 的暂停/继续需要在 delegate 回调持有的 item 上调用，
-    // 因此这里记录 pending 动作，由下一次 onDownloadUpdated 驱动。
     for (let i = 0; i < this.downloads.length; i++) {
       if (this.downloads[i].guid === guid) {
         this.downloads[i].state = toPause ? 'paused' : 'progressing';
@@ -765,10 +854,36 @@ struct Index {
       }
     }
     AiaStore.saveDownloads(this.downloads);
+    // 直接在活引用上暂停/继续。绝不能只排队等 onDownloadUpdated 消费：
+    // 暂停后内核不再派发该回调，队列里的 resume 会永远悬空——
+    // 表现就是「暂停后怎么点都恢复不了网络下载」
+    const live: webview.WebDownloadItem | undefined = this.liveItems.get(guid);
+    if (live !== undefined) {
+      try {
+        if (toPause) {
+          live.pause();
+        } else {
+          live.resume();
+        }
+        return;
+      } catch (err) {
+        // 引用失效则退回队列兜底
+      }
+    }
     WebPendingAction.set(guid, toPause ? 'pause' : 'resume');
   }
 
   private cancelDownload(guid: string): void {
+    const live: webview.WebDownloadItem | undefined = this.liveItems.get(guid);
+    if (live !== undefined) {
+      try {
+        live.cancel();
+      } catch (err) {
+        // 引用失效退回队列兜底
+      }
+    }
+    this.liveItems.delete(guid);
+    this.preTargets.delete(guid);
     WebPendingAction.set(guid, 'cancel');
     for (let i = 0; i < this.downloads.length; i++) {
       if (this.downloads[i].guid === guid) {
@@ -883,14 +998,71 @@ struct Index {
   }
 
   private deleteDownload(guid: string): void {
+    let name: string = '';
+    let hasFile: boolean = false;
+    for (let i = 0; i < this.downloads.length; i++) {
+      if (this.downloads[i].guid === guid) {
+        name = this.downloads[i].fileName;
+        hasFile = this.downloads[i].state === 'done';
+        break;
+      }
+    }
+    // 双选项确认：仅删记录（文件保留可再导出）/ 连文件一起删。
+    // 下载完成后用户经常既想清列表又想清磁盘，单删记录会留垃圾文件
+    this.getUIContext().showAlertDialog({
+      title: '删除「' + (name.length > 12 ? name.substring(0, 12) + '…' : name) + '」',
+      message: hasFile ? '要同时删除已下载的文件吗？删除后无法恢复。' : '仅删除该条下载记录。',
+      autoCancel: true,
+      alignment: DialogAlignment.Center,
+      primaryButton: {
+        value: hasFile ? '仅删除记录' : '删除',
+        fontColor: C('text_secondary'),
+        action: () => {
+          this.removeDownloadRecord(guid);
+        }
+      },
+      secondaryButton: {
+        value: hasFile ? '删除记录和文件' : '取消',
+        fontColor: '#B4552E',
+        action: () => {
+          if (hasFile) {
+            this.removeDownloadRecord(guid, true);
+          }
+        }
+      }
+    });
+  }
+
+  /** 执行单条删除：delFile=true 时连沙箱原件与公共副本一起删 */
+  private removeDownloadRecord(guid: string, delFile: boolean = false): void {
+    let target: DownloadItem | null = null;
     const rest: DownloadItem[] = [];
     for (let i = 0; i < this.downloads.length; i++) {
-      if (this.downloads[i].guid !== guid) {
+      if (this.downloads[i].guid === guid) {
+        target = this.downloads[i];
+      } else {
         rest.push(this.downloads[i]);
+      }
+    }
+    this.liveItems.delete(guid);
+    this.preTargets.delete(guid);
+    if (delFile && target !== null) {
+      try {
+        fileIo.unlinkSync(target.path); // 沙箱路径与 file:// uri 均可删
+      } catch (err) {
+        // 文件可能已被移动或删除
+      }
+      if (target.publicUri.length > 0 && target.publicUri !== target.path) {
+        try {
+          fileIo.unlinkSync(target.publicUri);
+        } catch (err) {
+          // 公共副本删除失败不影响记录删除
+        }
       }
     }
     this.downloads = rest;
     AiaStore.saveDownloads(this.downloads);
+    promptAction.showToast({ message: delFile ? '已删除记录和文件' : '已删除记录' });
   }
 
   /** 危险操作二次确认：确认后执行 confirm()，取消不动作 */

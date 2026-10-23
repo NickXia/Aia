@@ -10,6 +10,10 @@ import { C } from '../common/AiaTheme';
  * 1. 不要用带布尔参数的 @Builder 封装可点击图标——按值参数的事件闭包
  *    只在首次构建时求值，会导致点击永远失效；
  * 2. 灰显只做视觉提示，行为在 Index 侧实时查询内核决定。
+ *
+ * 可见性（保持原有尺寸，只调图标本身）：
+ * 可用态图标加深着色（导航键用强调色、主页键用强调色点睛），
+ * 不可用态保持淡灰弱化——不加底衬、不放大，布局与原来完全一致。
  */
 @Component
 export struct BottomBar {
@@ -29,8 +33,8 @@ export struct BottomBar {
           Image($r('app.media.ic_back'))
             .width(ZSize.icon)
             .height(ZSize.icon)
-            .opacity(this.tab.canGoBack && !this.home ? 1 : 0.18)
-            .scale(this.tab.canGoBack && !this.home ? { x: 1, y: 1 } : { x: 0.88, y: 0.88 })
+            .fillColor(this.tab.canGoBack && !this.home ? C('accent') : C('text_tertiary'))
+            .opacity(this.tab.canGoBack && !this.home ? 1 : 0.4)
         }
         .width(ZSize.iconButton)
         .height(ZSize.iconButton)
@@ -40,8 +44,8 @@ export struct BottomBar {
           Image($r('app.media.ic_forward'))
             .width(ZSize.icon)
             .height(ZSize.icon)
-            .opacity(this.tab.canGoForward && !this.home ? 1 : 0.18)
-            .scale(this.tab.canGoForward && !this.home ? { x: 1, y: 1 } : { x: 0.88, y: 0.88 })
+            .fillColor(this.tab.canGoForward && !this.home ? C('accent') : C('text_tertiary'))
+            .opacity(this.tab.canGoForward && !this.home ? 1 : 0.4)
         }
         .width(ZSize.iconButton)
         .height(ZSize.iconButton)
@@ -55,8 +59,8 @@ export struct BottomBar {
         Image($r('app.media.ic_home'))
           .width(ZSize.icon)
           .height(ZSize.icon)
-          .opacity(this.home ? 0.18 : 1)
-          .scale(this.home ? { x: 0.88, y: 0.88 } : { x: 1, y: 1 })
+          .fillColor(this.home ? C('text_tertiary') : C('accent'))
+          .opacity(this.home ? 0.4 : 1)
       }
       .width(ZSize.iconButton)
       .height(ZSize.iconButton)
@@ -68,6 +72,7 @@ export struct BottomBar {
           Image($r('app.media.ic_tabs'))
             .width(ZSize.icon)
             .height(ZSize.icon)
+            .fillColor(C('text_primary'))
           // 多于一个标签才显示数量角标：单标签显示"1"反而突兀
           if (this.tabCount > 1) {
             Text(this.tabCount > 99 ? '99+' : String(this.tabCount))
@@ -88,6 +93,7 @@ export struct BottomBar {
           Image($r('app.media.ic_more'))
             .width(ZSize.icon)
             .height(ZSize.icon)
+            .fillColor(C('text_primary'))
         }
         .width(ZSize.iconButton)
         .height(ZSize.iconButton)

@@ -142,11 +142,10 @@ export struct DownloadRow {
             .padding({ left: 5, right: 5, top: 6, bottom: 6 })
             .onClick(() => this.onOpen(this.item.guid))
         }
-        Image($r('app.media.ic_close_sm'))
-          .width(12)
-          .height(12)
-          .opacity(0.4)
-          .padding(6)
+        Text('删除')
+          .fontSize(Math.round(12 * getUiScale()))
+          .fontColor(C('danger'))
+          .padding({ left: 8, right: 6, top: 6, bottom: 6 })
           .onClick(() => this.onDelete(this.item.guid))
       }
     }

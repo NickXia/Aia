@@ -327,6 +327,13 @@ export struct WebPane {
         // 注意：onErrorReceive 也会对页面内资源（视频流/字体/CDN 媒体）触发——
         // 只有「当前主文档本身」加载失败才弹错误卡。B站视频页会自动预载
         // bilivideo.com 的 mp4 流，失败若误判会让渲染完好的页面被蒙上错误卡
+        // 下载型导航（onBeforeDownload 已接管）主帧不渲染页面，内核可能
+        // 补发主文档错误——这不是网页失败，10 秒窗口内的错误一律忽略
+        const dlAt: number = AppStorage.get<number>('dlNavAt') ?? 0;
+        if (dlAt > 0 && Date.now() - dlAt < 10000) {
+          console.info('AiaWeb errorReceive (downloadNav, ignored)');
+          return;
+        }
         try {
           const errUrl: string = event !== undefined ? event.request.getRequestUrl() : '';
           const errLower: string = errUrl.toLowerCase();
