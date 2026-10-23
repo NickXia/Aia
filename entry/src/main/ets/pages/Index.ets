@@ -6,9 +6,9 @@ import { DownloadsPanel } from '../view/DownloadsPanel';
 import { DownloadItem } from '../model/Models';
 import { pasteboard, BusinessError } from '@kit.BasicServicesKit';
 import { photoAccessHelper } from '@kit.MediaLibraryKit';
-import { BrowserTab, Bookmark, HistoryEntry, TabInfo, DialItem } from '../model/Models';
+import { BrowserTab, Bookmark, HistoryEntry, TabInfo, DialItem, DownloadNavGate } from '../model/Models';
 import { ENGINES, SearchEngine } from '../common/SearchEngine';
-import { hostOf, resolveInput, isSecure, colorForHost } from '../common/UrlUtils';
+import { hostOf, resolveInput, isSecure, colorForHost, sanitizeFileName } from '../common/UrlUtils';
 import { AiaStore } from '../common/Storage';
 import { setUiScale, getUiScale, setThemeMode, C } from '../common/AiaTheme';
 import { WebPane } from '../view/WebPane';
@@ -59,14 +59,14 @@ struct Index {
   @State readingTheme: boolean = false;
   /** 系统深浅色变化时递增（EntryAbility 写入），驱动整树重建取新色 */
   @StorageLink('themeEpoch') themeEpoch: number = 0;
-  /** 活动标签网页加载失败（WebPane 写入），显示错误出路 */
-  @StorageLink('loadFailed') loadFailed: boolean = false;
   @State downloads: DownloadItem[] = AiaStore.loadDownloads();
   @State downloadsVisible: boolean = false;
   @State desktopUA: boolean = AiaStore.desktopUA;
   @State debugH5: boolean = AiaStore.debugH5;
   @State downloadAskMode: boolean = AiaStore.downloadAskMode;
   private downloadDelegate: webview.WebDownloadDelegate = new webview.WebDownloadDelegate();
+  // 下载导航错误忽略状态：构造 WebPane 时按引用传入（ADR-2，取代 dlNavAt/dlPicking 幽灵键）
+  private dlGate: DownloadNavGate = new DownloadNavGate();
   // 进行中下载的活引用表：pause/resume 必须在 item 对象上直接调用。
   // 不能走「队列 + 等 onDownloadUpdated 消费」——暂停后内核不再派发
   // updated 回调，队列里的 resume 永远没人消费，任务就永远卡在暂停态
@@ -102,21 +102,18 @@ struct Index {
     if (this.readingTheme) {
       setThemeMode('parchment');
     }
-    // 下载委托：全局注册一次，网页触发的下载统一走这里
-    // delegate 通过 AppStorage 共享给各 WebPane（内核创建时 setDownloadDelegate 注册）
-    AppStorage.setOrCreate<webview.WebDownloadDelegate>('downloadDelegate', this.downloadDelegate);
+    // 下载委托：Index 是唯一所有者，构造 WebPane 时按引用传入注册
+    // （ADR-2：不再经 AppStorage 共享，所有权清晰、无幽灵键）
     this.downloadDelegate.onBeforeDownload((item: webview.WebDownloadItem) => {
       const guid: string = item.getGuid();
       // 第一时间标记「这是下载型导航」：内核检测到附件后会立刻/延迟补发
       // 主文档错误（实测选择器开着 25 秒后仍会补发）、不派发 pageBegin。
-      // dlPicking=选择器存活期间无条件忽略；dlNavAt=start 后 10 秒窗口
-      AppStorage.setOrCreate<number>('dlNavAt', Date.now());
-      AppStorage.setOrCreate<boolean>('dlPicking', true);
+      // dlGate.picking=选择器存活期间无条件忽略；dlGate.navAt=start 后 10 秒窗口
+      this.dlGate.navAt = Date.now();
+      this.dlGate.picking = true;
       const url: string = item.getUrl();
-      let name: string = url.substring(url.lastIndexOf('/') + 1).split('?')[0];
-      // 文件名白名单清洗：去路径穿越/非法字符（审查 #11），保留常用安全字符
-      name = name.replace(/[^0-9A-Za-z._\-\u4e00-\u9fa5]/g, '_');
-      if (name.length === 0 || name === '.' || name === '..') {
+      let name: string = sanitizeFileName(url.substring(url.lastIndexOf('/') + 1).split('?')[0]);
+      if (name.length === 0) {
         name = 'download_' + Date.now();
       }
       const dir: string = getContext(this).filesDir + '/downloads';
@@ -137,8 +134,8 @@ struct Index {
         item.start(path);
         self.liveItems.set(guid, item);
         // 下载真正开始：结束选择器态，改用 start 后 10 秒错误忽略窗口
-        AppStorage.setOrCreate<boolean>('dlPicking', false);
-        AppStorage.setOrCreate<number>('dlNavAt', Date.now());
+        self.dlGate.picking = false;
+        self.dlGate.navAt = Date.now();
         for (let t = 0; t < self.tabs.length; t++) {
           if (self.tabs[t].id === self.activeId) {
             self.tabs[t].pageBeginSeen = true;
@@ -171,7 +168,7 @@ struct Index {
                 startNow();
               } else {
                 // 用户主动取消选择：取消下载任务，不偷偷下到应用目录
-                AppStorage.setOrCreate<boolean>('dlPicking', false);
+                self.dlGate.picking = false;
                 try {
                   item.cancel();
                 } catch (err) {
@@ -439,7 +436,7 @@ struct Index {
 
   /** 空白页看门狗：非主页状态下停留在占位页且无加载活动 → 自愈回主页 */
   private blankWatchdog(): void {
-    if (this.showHome || this.loadFailed || this.dialEditorVisible || this.menuVisible
+    if (this.showHome || this.activeTab().loadFailed || this.dialEditorVisible || this.menuVisible
       || this.settingsVisible || this.recordsVisible || this.tabsVisible) {
       return;
     }
@@ -462,7 +459,7 @@ struct Index {
       // pageBegin 且无加载活动 → 疑似加载失败。但内核回调漏报时页面
       // 可能实际已渲染（SPA 跳转/深链拦截等都可能吞回调）——先探测
       // 文档真实内容，确有内容就当加载成功，绝不误弹错误卡。
-      if (!tab.isLoading && !tab.pageBeginSeen && !this.loadFailed && !tab.userStopped
+      if (!tab.isLoading && !tab.pageBeginSeen && !tab.loadFailed && !tab.userStopped
         && Date.now() - tab.lastNavTime > 15000) {
         if (!tab.retriedOnce) {
           tab.retriedOnce = true;
@@ -491,12 +488,12 @@ struct Index {
                 tab.lastNavTime = Date.now();
               } else {
                 console.info('AiaWatch probe empty len=' + r.getString() + ' url=' + tab.url);
-                AppStorage.setOrCreate<boolean>('loadFailed', true);
+                tab.loadFailed = true;
               }
             })
             .catch(() => {
               console.info('AiaWatch probe fail -> loadFailed');
-              AppStorage.setOrCreate<boolean>('loadFailed', true);
+              tab.loadFailed = true;
             })
             .finally(() => {
               tab.probeBusy = false;
@@ -681,10 +678,10 @@ struct Index {
     tab.lastNavTime = Date.now();
     tab.pageBeginSeen = false;
     tab.loadError = false;
+    tab.loadFailed = false;
     tab.retriedOnce = false;
     tab.userStopped = false;
     tab.expectBlankHome = false;
-    AppStorage.setOrCreate<boolean>('loadFailed', false);
     tab.progress = 0;
     tab.isLoading = true;
     AppStorage.setOrCreate<number>('loadingPct', 0);
@@ -1368,8 +1365,8 @@ struct Index {
 
   /** 网页加载失败后的重试 */
   private retryActive(): void {
-    AppStorage.setOrCreate<boolean>('loadFailed', false);
     const tab: BrowserTab = this.activeTab();
+    tab.loadFailed = false;
     if (tab.controller === null) {
       return;
     }
@@ -1495,6 +1492,8 @@ struct Index {
               desktopUA: this.desktopUA,
               readingTheme: this.readingTheme,
               debugH5: this.debugH5,
+              dlGate: this.dlGate,
+              downloadDelegate: this.downloadDelegate,
               onPageStart: (t: BrowserTab) => this.handlePageStart(t),
               onPageFinished: (t: BrowserTab) => this.handlePageFinished(t),
               onNewWindow: (url: string) => this.openInNewTab(url)
@@ -1597,7 +1596,7 @@ struct Index {
 
       // 加载失败：给出明确出路（重试 / 返回主页），不留白屏。
       // 注意：卡片会拦截全屏点击（含底栏），必须自带「返回主页」出口
-      if (!this.showHome && this.loadFailed) {
+      if (!this.showHome && this.activeTab().loadFailed) {
         Column({ space: 14 }) {
           Text('网页打开失败')
             .fontSize(Math.round(17 * getUiScale()))

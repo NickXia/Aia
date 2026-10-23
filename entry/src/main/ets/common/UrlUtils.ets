@@ -86,3 +86,15 @@ export function initialOf(host: string): string {
   }
   return clean.substring(0, 1).toUpperCase();
 }
+
+/**
+ * 下载文件名白名单清洗（工程审查 #11）：路径穿越与非法字符替换为下划线，
+ * 保留中英文/数字/点/横线。空串、'.'、'..' 一律清洗为空串（调用方负责兜底名）。
+ */
+export function sanitizeFileName(name: string): string {
+  const n: string = name.replace(/[^0-9A-Za-z._\-\u4e00-\u9fa5]/g, '_');
+  if (n.length === 0 || n === '.' || n === '..') {
+    return '';
+  }
+  return n;
+}

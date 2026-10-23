@@ -28,6 +28,8 @@ export class BrowserTab {
   probeBusy: boolean = false;
   /** 用户手动停止了加载：看门狗不再自动重试，下次导航时清除 */
   userStopped: boolean = false;
+  /** 活动主文档加载失败（WebPane 写入）：所有权在标签上，不再走 AppStorage 幽灵键（ADR-2） */
+  loadFailed: boolean = false;
   controller: webview.WebviewController | null = null;
 
   constructor(id: string) {
@@ -91,6 +93,18 @@ export interface RecordJson {
   title: string;
   url: string;
   time: number;
+}
+
+/**
+ * 下载型导航的错误忽略状态（ADR-2：取代 dlNavAt/dlPicking 两个 AppStorage 幽灵键）。
+ * 所有权归 Index（下载生命周期管理者），构造 WebPane 时按引用传入；
+ * onErrorReceive 是事件驱动读取，不需要响应式——普通可变对象即可。
+ */
+export class DownloadNavGate {
+  /** 下载前选择器存活期间：无条件忽略主文档补发错误 */
+  picking: boolean = false;
+  /** 下载导航 start 时刻：之后 DL_ERROR_WINDOW_MS 内的补发错误忽略 */
+  navAt: number = 0;
 }
 
 /** 主页快捷方式 */

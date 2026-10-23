@@ -1,8 +1,11 @@
 import { webview } from '@kit.ArkWeb';
 import { common, bundleManager } from '@kit.AbilityKit';
 import { promptAction } from '@kit.ArkUI';
-import { BrowserTab } from '../model/Models';
-import { hostOf } from '../common/UrlUtils';
+import { BrowserTab, DownloadNavGate } from '../model/Models';
+import {
+  classifyLoadError, decideDeepLink, isMainDocHttpError,
+  shouldAllowFullscreen, shouldIgnoreDownloadNavError
+} from '../common/NavigationPolicy';
 
 /**
  * 单个标签页的 Web 内核容器。
@@ -28,6 +31,10 @@ export struct WebPane {
   @Prop readingTheme: boolean;
   /** 桌面版 UA：切换后对当前 Web 上下文生效 */
   @Prop @Watch('applyUa') desktopUA: boolean;
+  /** 下载导航错误忽略状态：Index 构造时按引用传入（ADR-2，不走 AppStorage） */
+  dlGate: DownloadNavGate = new DownloadNavGate();
+  /** 下载委托：Index 构造时直接传入注册（ADR-2，不走 AppStorage） */
+  downloadDelegate: webview.WebDownloadDelegate | null = null;
 
   private applyUa(): void {
     try {
@@ -109,10 +116,9 @@ export struct WebPane {
       .onControllerAttached(() => {
         this.tab.controller = this.controller;
         try {
-          // 注册下载委托：网页触发的下载统一交给 Index 管理的 delegate
-          const delegate = AppStorage.get<webview.WebDownloadDelegate>('downloadDelegate');
-          if (delegate !== undefined) {
-            this.controller.setDownloadDelegate(delegate);
+          // 注册下载委托：网页触发的下载统一交给 Index 管理的 delegate（构造时传入）
+          if (this.downloadDelegate !== null) {
+            this.controller.setDownloadDelegate(this.downloadDelegate);
           }
         } catch (err) {
           // ignore
@@ -137,8 +143,8 @@ export struct WebPane {
         }
       })
       .onLoadIntercept((event: OnLoadInterceptEvent) => {
-        // 自定义 scheme（zhihu:// 等）＝「打开 App」按钮：主帧才处理，
-        // 子帧/子资源里的内部 scheme 一律放行——误杀会让整页资源加载失败
+        // 深链决策逻辑已抽为纯函数 decideDeepLink（ADR-1，白名单+手势门槛+冷却，
+        // 单测覆盖见 src/test）——这里只负责执行判定结果
         let isMain: boolean = true;
         try {
           isMain = event.data.isMainFrame();
@@ -146,34 +152,27 @@ export struct WebPane {
           // ignore
         }
         const url: string = event.data.getRequestUrl();
-        const lower: string = url.toLowerCase();
-        const isWeb: boolean = lower.startsWith('http://') || lower.startsWith('https://')
-          || lower.startsWith('about:') || lower.startsWith('data:')
-          || lower.startsWith('blob:') || lower.startsWith('javascript:');
-        if (isWeb || !isMain) {
+        const d = decideDeepLink(url, isMain,
+          Date.now() - this.lastTouchAt < 1000, Date.now(), this.lastOpenLinkAt);
+        if (d.action === 'pass') {
           return false;
         }
-        // 主帧 + 自定义 scheme：一律先拦截（return true），「设备上有没有
-        // App 能接手」的判断延迟到下一个事件循环——canOpenLink 是同步跨
-        // 进程调用，在内核导航回调里直接执行，遇系统「想要打开」弹窗
-        // 会话会与模态互等，把 UI 线程冻死（实测知乎深链致整机无响应）。
-        // 另加 6 秒冷却：B站/知乎页面会自动循环触发深链，不冷却会反复
-        // 弹系统确认框刷屏。
-        // 手势门槛：只有用户 1 秒内真实触摸过屏幕才允许唤起 App——
-        // 知乎问题页会加载后自动 location.href=zhihu:// 拉起 App 本体，
-        // 用户毫无感知就被带离浏览器（日志实证 scheme zhihu:// can=true）。
-        // 页面自己触发的深链（无触摸伴随）一律静默留在网页
-        const touched: boolean = Date.now() - this.lastTouchAt < 1000;
-        if (!touched) {
-          console.info('AiaWeb scheme blocked (no user gesture) ' + url.split('?')[0].substring(0, 60));
-          // 一次性提示：让用户知道"打开App"被留在网页内了（独立冷却防刷屏，
-          // 不与 openLink 冷却共用——否则会误伤紧随其后的正常唤起）
-          if (Date.now() - this.lastBlockToastAt > 6000) {
+        // 主帧自定义 scheme 一律先拦截（return true）：canOpenLink 是同步跨
+        // 进程调用，在内核导航回调里直接执行会与系统模态互等冻死 UI 线程
+        // （实测知乎深链致整机无响应），判定/唤起延迟到下一事件循环
+        if (d.action === 'block') {
+          console.info('AiaWeb scheme blocked ' + url.split('?')[0].substring(0, 60));
+          if (d.notify && Date.now() - this.lastBlockToastAt > 6000) {
             this.lastBlockToastAt = Date.now();
             promptAction.showToast({ message: '已在网页内打开（未跳转外部应用）' });
           }
           return true;
         }
+        if (!d.cooled) {
+          console.info('AiaWeb scheme cooldown ' + url.split('?')[0].substring(0, 60));
+          return true;
+        }
+        this.lastOpenLinkAt = Date.now();
         setTimeout(() => {
           let canOpen: boolean = false;
           try {
@@ -182,8 +181,7 @@ export struct WebPane {
             console.info('AiaWeb scheme queryFail ' + url);
           }
           console.info('AiaWeb scheme ' + url.split('?')[0].substring(0, 60) + ' can=' + canOpen);
-          if (canOpen && Date.now() - this.lastOpenLinkAt > 6000) {
-            this.lastOpenLinkAt = Date.now();
+          if (canOpen) {
             try {
               const ctx = getContext(this) as common.UIAbilityContext;
               ctx.openLink(url, { appLinkingOnly: false }).catch(() => {
@@ -240,14 +238,12 @@ export struct WebPane {
         }
         this.tab.pageBeginSeen = true;
         this.tab.loadError = false;
+        this.tab.loadFailed = false;
         this.tab.userStopped = false; // 新导航（含页内点击）恢复进度监听
         console.info('AiaWeb pageBegin ' + current);
         this.tab.url = current;
         this.tab.isLoading = true;
         this.tab.progress = 0;
-        if (this.active) {
-          AppStorage.setOrCreate<boolean>('loadFailed', false);
-        }
         // 在加载开始时就刷新导航状态，不等 onPageEnd——
         // 否则慢页面加载期间返回键会一直处于滞后状态
         try {
@@ -335,17 +331,24 @@ export struct WebPane {
         }
         this.syncLoading();
         this.applyReadingFilter();
-        if (this.active) {
-          AppStorage.setOrCreate<boolean>('loadFailed', false);
-        }
+        this.tab.loadFailed = false;
         this.onPageFinished(this.tab);
       })
-      // 诊断：主文档 HTTP 错误状态码（4xx/5xx 不触发 onErrorReceive）
+      // ADR-3：主文档 HTTP 4xx/5xx 是确定性失败信号（这类错误不触发
+      // onErrorReceive）。资源级 HTTP 错误照旧只记日志。
       .onHttpErrorReceive((event: OnHttpErrorReceiveEvent) => {
         try {
+          const code: number = event.response.getResponseCode();
+          const main: boolean = event.request.isMainFrame();
           console.info('AiaWeb httpErr url=' + event.request.getRequestUrl()
-            + ' code=' + event.response.getResponseCode()
-            + ' main=' + event.request.isMainFrame());
+            + ' code=' + code + ' main=' + main);
+          if (isMainDocHttpError(code, main)) {
+            this.tab.loadError = true;
+            this.tab.loadFailed = true;
+            this.tab.isLoading = false;
+            this.tab.progress = 100;
+            this.syncLoading();
+          }
         } catch (err) {
           // ignore
         }
@@ -354,32 +357,29 @@ export struct WebPane {
       // 否则进度条会永远卡住
       .onErrorReceive((event?: OnErrorReceiveEvent) => {
         // 下载型导航（onBeforeDownload 已接管）主帧不渲染页面，内核可能
-        // 对未渲染的主文档补发错误——选择器存活期间（dlPicking）无条件忽略
+        // 对未渲染的主文档补发错误——选择器存活期间无条件忽略
         // （实测用户在选择器停留 25 秒后内核仍会补发，10 秒窗口不够）；
-        // start 后 10 秒窗口（dlNavAt）内的补发同样忽略
-        const dlAt: number = AppStorage.get<number>('dlNavAt') ?? 0;
-        const picking: boolean = AppStorage.get<boolean>('dlPicking') ?? false;
-        if (picking || (dlAt > 0 && Date.now() - dlAt < 10000)) {
+        // start 后 10 秒窗口内的补发同样忽略。
+        // 状态来自 Index 按引用传入的 dlGate（ADR-2，不再走 AppStorage）
+        if (shouldIgnoreDownloadNavError(this.dlGate.picking, this.dlGate.navAt, Date.now())) {
           console.info('AiaWeb errorReceive (downloadNav, ignored)');
           return;
         }
-        // 注意：onErrorReceive 也会对页面内资源（视频流/字体/CDN 媒体）触发——
-        // 只有「当前主文档本身」加载失败才弹错误卡。B站视频页会自动预载
-        // bilivideo.com 的 mp4 流，失败若误判会让渲染完好的页面被蒙上错误卡
+        // ADR-3 错误归一化：主帧信号优先（event.request.isMainFrame()），
+        // hostOf 同域对比只在信号不可用时降级兜底——B站视频页会自动预载
+        // bilivideo.com 的 mp4 流，资源级失败绝不能误判成主文档失败
         try {
           const errUrl: string = event !== undefined ? event.request.getRequestUrl() : '';
-          const errLower: string = errUrl.toLowerCase();
-          if (errUrl.length > 0 && !errLower.startsWith('http://') && !errLower.startsWith('https://')
-            && !errLower.startsWith('about:') && !errLower.startsWith('data:')
-            && !errLower.startsWith('blob:')) {
-            console.info('AiaWeb errorReceive (scheme, ignored) ' + errUrl);
-            return;
+          let mainSignal: boolean | null = null;
+          try {
+            mainSignal = event !== undefined ? event.request.isMainFrame() : null;
+          } catch (e) {
+            mainSignal = null; // 信号不可用：降级 hostOf 对比
           }
           const docUrl: string = this.tab.url;
-          const sameDoc: boolean = docUrl.length > 0
-            && (errUrl === docUrl || hostOf(errUrl) === hostOf(docUrl));
-          console.info('AiaWeb errorReceive ' + errUrl + ' sameDoc=' + sameDoc);
-          if (!sameDoc) {
+          const mainDoc: boolean = classifyLoadError(errUrl, docUrl, mainSignal);
+          console.info('AiaWeb errorReceive ' + errUrl + ' main=' + mainSignal + ' mainDoc=' + mainDoc);
+          if (!mainDoc) {
             // 资源级错误（CDN 媒体流等）：页面照常显示，只结束加载圈
             this.tab.isLoading = false;
             this.tab.progress = 100;
@@ -390,19 +390,16 @@ export struct WebPane {
           // ignore
         }
         this.tab.loadError = true;
+        this.tab.loadFailed = true;
         this.tab.isLoading = false;
         this.tab.progress = 100;
         this.syncLoading();
-        if (this.active) {
-          AppStorage.setOrCreate<boolean>('loadFailed', true);
-        }
       })
       // 网页全屏请求手势门槛化：用户点视频全屏按钮必伴随触摸（1 秒内）
       // → 放行；页面自动请求的横幅全屏（无手势）会把 Web 撑满整窗盖住
       // Aia 工具栏且系统返回退不出（实测知乎视频横幅）→ 立即拒绝
       .onFullScreenEnter((event: FullScreenEnterEvent) => {
-        const touched: boolean = Date.now() - this.lastTouchAt < 1000;
-        if (!touched) {
+        if (!shouldAllowFullscreen(this.lastTouchAt, Date.now())) {
           console.info('AiaWeb fullscreenEnter -> reject (no user gesture)');
           try {
             event.handler.exitFullScreen();
