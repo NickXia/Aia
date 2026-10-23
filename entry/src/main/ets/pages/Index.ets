@@ -256,17 +256,17 @@ struct Index {
       const target: string | undefined = this.preTargets.get(finGuid);
       if (target !== undefined && doneIdx >= 0) {
         this.preTargets.delete(finGuid);
-        try {
-          fileIo.copyFileSync(this.downloads[doneIdx].path, target);
-          try {
-            fileIo.unlinkSync(this.downloads[doneIdx].path);
-          } catch (err) {
-            // ignore
-          }
+        if (this.moveToUri(this.downloads[doneIdx].path, target)) {
           this.downloads[doneIdx].path = target;
           this.downloads[doneIdx].publicUri = target;
           promptAction.showToast({ message: '已保存到所选位置' });
-        } catch (err) {
+        } else {
+          // 搬移失败：清掉选择器预创建的空占位文件，保留应用目录原件
+          try {
+            fileIo.unlinkSync(target);
+          } catch (err) {
+            // ignore
+          }
           promptAction.showToast({ message: '搬移到所选位置失败，文件在应用目录' });
         }
         AiaStore.saveDownloads(this.downloads);
@@ -349,7 +349,16 @@ struct Index {
     });
     this.downloadDelegate.onDownloadFailed((item: webview.WebDownloadItem) => {
       this.liveItems.delete(item.getGuid());
-      this.preTargets.delete(item.getGuid());
+      // 清掉选择器预创建的空占位文件，别让用户目录里留 0 字节垃圾
+      const ph: string | undefined = this.preTargets.get(item.getGuid());
+      if (ph !== undefined) {
+        try {
+          fileIo.unlinkSync(ph);
+        } catch (err) {
+          // ignore
+        }
+        this.preTargets.delete(item.getGuid());
+      }
       for (let i = 0; i < this.downloads.length; i++) {
         if (this.downloads[i].guid === item.getGuid()) {
           this.downloads[i].state = 'failed';
@@ -883,7 +892,16 @@ struct Index {
       }
     }
     this.liveItems.delete(guid);
-    this.preTargets.delete(guid);
+    // 用户取消下载时同样清掉预创建的空占位文件
+    const ph2: string | undefined = this.preTargets.get(guid);
+    if (ph2 !== undefined) {
+      try {
+        fileIo.unlinkSync(ph2);
+      } catch (err) {
+        // ignore
+      }
+      this.preTargets.delete(guid);
+    }
     WebPendingAction.set(guid, 'cancel');
     for (let i = 0; i < this.downloads.length; i++) {
       if (this.downloads[i].guid === guid) {
@@ -995,6 +1013,38 @@ struct Index {
     this.downloads = [];
     AiaStore.saveDownloads(this.downloads);
     promptAction.showToast({ message: delFiles ? '已清空记录并删除文件' : '已清空下载记录' });
+  }
+
+  /**
+   * 搬移沙箱文件到选择器返回的 uri。
+   * 关键坑：对 picker uri 直接 copyFileSync(src, uri) 会失败或写不进内容
+   * （选择器 save() 只预创建了 0 字节占位文件），必须 open 出 fd 再按
+   * fd 写入，写完关闭并删除沙箱原件。
+   */
+  private moveToUri(srcPath: string, uri: string): boolean {
+    let fd: number = -1;
+    try {
+      const f = fileIo.openSync(uri, fileIo.OpenMode.READ_WRITE | fileIo.OpenMode.TRUNC);
+      fd = f.fd;
+      fileIo.copyFileSync(srcPath, fd);
+      fileIo.closeSync(fd);
+      fd = -1;
+      try {
+        fileIo.unlinkSync(srcPath);
+      } catch (err) {
+        // 原件删除失败不影响结果（目标已有完整内容）
+      }
+      return true;
+    } catch (err) {
+      if (fd >= 0) {
+        try {
+          fileIo.closeSync(fd);
+        } catch (e) {
+          // ignore
+        }
+      }
+      return false;
+    }
   }
 
   private deleteDownload(guid: string): void {
