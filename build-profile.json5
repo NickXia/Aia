@@ -28,26 +28,13 @@
         "name": "default",
         "type": "HarmonyOS",
         "material": {
-          "certpath": "C:\\Users\\Xzz18\\.ohos\\config\\default_Aia_OK-oYf9k2b1ObQqy2iyt_6aQB0kEKudTq4yr94all9U=.cer",
+          "certpath": "C:\\Users\\xiazz\\.ohos\\config\\default_Aia_ABC0LlfxbNenQmwTVdkt4n0-B9rAAMl5PbW2Q6u8cic=.cer",
           "keyAlias": "debugKey",
-          "keyPassword": "0000001960E773A9F08A9E6F460F1AA1D9D40D3D38B08274C541B171B169F9EA9BA1F3EB032E80EDF6",
-          "profile": "C:\\Users\\Xzz18\\.ohos\\config\\default_Aia_OK-oYf9k2b1ObQqy2iyt_6aQB0kEKudTq4yr94all9U=.p7b",
+          "keyPassword": "0000001BFA7A5544D2CC8B5ADBAC3DEE867740223EE561D92EBEC85725EB4E9BA960CF32569C0E7CB9A112",
+          "profile": "C:\\Users\\xiazz\\.ohos\\config\\default_Aia_ABC0LlfxbNenQmwTVdkt4n0-B9rAAMl5PbW2Q6u8cic=.p7b",
           "signAlg": "SHA256withECDSA",
-          "storeFile": "C:\\Users\\Xzz18\\.ohos\\config\\default_Aia_OK-oYf9k2b1ObQqy2iyt_6aQB0kEKudTq4yr94all9U=.p12",
-          "storePassword": "00000019B53A278F321619574224700A795709DD65AF2B0E698AA1BF3C4021BDBC73F79F8E0826172B"
-        }
-      },
-      {
-        "name": "release",
-        "type": "HarmonyOS",
-        "material": {
-          "certpath": "D:\\HarmonyProjects\\Aia\\certs\\aia_release.cer",
-          "keyAlias": "debugKey",
-          "keyPassword": "0000001960E773A9F08A9E6F460F1AA1D9D40D3D38B08274C541B171B169F9EA9BA1F3EB032E80EDF6",
-          "profile": "D:\\HarmonyProjects\\Aia\\certs\\aia_release_profileRelease.p7b",
-          "signAlg": "SHA256withECDSA",
-          "storeFile": "C:\\Users\\Xzz18\\.ohos\\config\\default_Aia_OK-oYf9k2b1ObQqy2iyt_6aQB0kEKudTq4yr94all9U=.p12",
-          "storePassword": "00000019B53A278F321619574224700A795709DD65AF2B0E698AA1BF3C4021BDBC73F79F8E0826172B"
+          "storeFile": "C:\\Users\\xiazz\\.ohos\\config\\default_Aia_ABC0LlfxbNenQmwTVdkt4n0-B9rAAMl5PbW2Q6u8cic=.p12",
+          "storePassword": "0000001B42713C19B8A743D2A3BD66D79EA3B87273B3B2875549A37E34EB5FCA8CD2F2235FFD3DEC6334CE"
         }
       }
     ]
