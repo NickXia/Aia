@@ -1438,23 +1438,15 @@ struct Index {
    * 清理全部标签页的 WebView 缓存（内存 + 磁盘离线缓存）。
    * 浏览器是应用数据膨胀的主因：HTTP 缓存/离线资源随浏览无限增长。
    * 只清缓存，不动 Cookie 与 localStorage——登录态不受影响。
-   * 无痕标签走内存态，无可清理，跳过即可。
+   * removeAllCache 是应用级静态方法，一次清除所有 Web 组件的缓存（API 26）。
    */
   private clearWebCache(): void {
-    let cleared: number = 0;
-    for (let i = 0; i < this.tabs.length; i++) {
-      const ctrl: webview.WebviewController | null = this.tabs[i].controller;
-      if (ctrl === null) {
-        continue;
-      }
-      try {
-        ctrl.clearCache(true);
-        cleared++;
-      } catch (err) {
-        // 标签正在加载等场景可能失败：跳过该标签
-      }
+    try {
+      webview.WebviewController.removeAllCache(true);
+      promptAction.showToast({ message: '网页缓存已清理' });
+    } catch (err) {
+      promptAction.showToast({ message: '缓存清理失败，请稍后重试' });
     }
-    promptAction.showToast({ message: cleared > 0 ? '网页缓存已清理' : '暂无可清理的缓存，请先打开任意网页' });
   }
 
   private async copyUrl(): Promise<void> {
