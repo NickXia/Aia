@@ -55,12 +55,19 @@ export struct TabsPanel {
             .backgroundColor('#2E3440')
         }
 
-        Image($r('app.media.ic_close_sm'))
-          .width(13)
-          .height(13)
-          .opacity(0.45)
-          .padding(5)
-          .onClick(() => this.onCloseTab(tab.id))
+        // 单独关闭按钮：圆形芯片，26px 视觉 + 足够触控热区，
+        // 比纯图标更醒目（此前 13px 图标 opacity 0.45 几乎不可见）
+        Stack() {
+          Image($r('app.media.ic_close_sm'))
+            .width(13)
+            .height(13)
+            .opacity(0.62)
+        }
+        .width(26)
+        .height(26)
+        .borderRadius(13)
+        .backgroundColor(C('surface_alt_2'))
+        .onClick(() => this.onCloseTab(tab.id))
       }
       .width('100%')
       .height(40)

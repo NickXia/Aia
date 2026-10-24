@@ -53,12 +53,20 @@ export struct RecordsPanel {
       .layoutWeight(1)
       .alignItems(HorizontalAlign.Start)
 
-      Image($r('app.media.ic_close_sm'))
-        .width(12)
-        .height(12)
-        .opacity(0.4)
-        .padding(6)
-        .onClick(() => this.onDelete(item.id))
+      // 单独删除按钮：圆形芯片，30px 视觉（≥36px 触控热区含间隙），
+      // 点击只删该条，不影响整行的打开动作
+      Stack() {
+        Image($r('app.media.ic_close_sm'))
+          .width(13)
+          .height(13)
+          .opacity(0.62)
+      }
+      .width(30)
+      .height(30)
+      .borderRadius(15)
+      .backgroundColor(C('surface_alt_2'))
+      .margin({ right: 4 })
+      .onClick(() => this.onDelete(item.id))
     }
     .width('100%')
     .padding({ top: 8, bottom: 8 })
