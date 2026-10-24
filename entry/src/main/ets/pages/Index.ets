@@ -1342,7 +1342,23 @@ struct Index {
     if (this.downloadDirUri.length === 0) {
       return '';
     }
-    return this.downloadDirUri.substring(this.downloadDirUri.lastIndexOf('/') + 1);
+    // 文档提供方 URI 形如 datashareproxy://<bundle>/...（authority 后可能无路径），
+    // 直接取末段会得到包名；先剥掉 scheme+authority，仅从路径段取文件夹名
+    let raw: string = this.downloadDirUri;
+    try {
+      raw = decodeURIComponent(raw);
+    } catch (err) {
+      // 解码失败按原文处理
+    }
+    const schemeIdx: number = raw.indexOf('://');
+    if (schemeIdx >= 0) {
+      raw = raw.substring(schemeIdx + 3);
+      const pathStart: number = raw.indexOf('/');
+      raw = pathStart >= 0 ? raw.substring(pathStart + 1) : '';
+    }
+    const segs: string[] = raw.split('/').filter((s: string) => s.length > 0);
+    const name: string = segs.length > 0 ? segs[segs.length - 1] : '';
+    return name.length > 0 ? name : '已选文件夹';
   }
 
   /** 设置面板「更改/去选择」：重新拉起文件夹选择器 */
@@ -1700,7 +1716,8 @@ struct Index {
           })
         }
 
-        Stack() {
+        // 顶对齐：省流提示条浮在网页内容顶部，WebPane/HomeView 均满幅不受影响
+        Stack({ alignContent: Alignment.Top }) {
           ForEach(this.tabs, (tab: BrowserTab) => {
             WebPane({
               tab: tab,
@@ -1723,6 +1740,41 @@ struct Index {
             HomeView({
               onOpen: (url: string) => this.navigate(url)
             })
+          }
+
+          // 省流提示条：图片被阻止时页面内必须可见可撤销（缺陷3——
+          // 此前只有设置里的开关，用户面对满屏破图无从排查）
+          if (this.blockImages && !this.showHome) {
+            Row({ space: 10 }) {
+              Text('已开启省流模式，网页图片不加载')
+                .fontSize(12)
+                .fontColor(C('text_secondary'))
+                .layoutWeight(1)
+                .textAlign(TextAlign.Start)
+                .maxLines(1)
+
+              Text('恢复图片')
+                .fontSize(13)
+                .fontColor(C('accent'))
+                .padding({ left: 10, right: 10, top: 5, bottom: 5 })
+                .borderRadius(12)
+                .backgroundColor(C('surface_alt'))
+                .onClick(() => {
+                  this.blockImages = false;
+                  AiaStore.blockImages = false;
+                  const active: BrowserTab = this.activeTab();
+                  if (active.controller !== null) {
+                    try {
+                      active.controller.refresh();
+                    } catch (err) {
+                      // 刷新失败时属性已更新，下次导航生效
+                    }
+                  }
+                })
+            }
+            .width('100%')
+            .padding({ left: 14, right: 14, top: 7, bottom: 7 })
+            .backgroundColor(C('surface_alt_2'))
           }
         }
         .width('100%')
@@ -1913,7 +1965,10 @@ struct Index {
               AiaStore.elderMode = value;
               setUiScale(value ? 1.25 : 1.0);
               this.uiEpoch = this.uiEpoch + 1;
-              promptAction.showToast({ message: value ? '已开启关怀模式' : '已返回标准模式' });
+              // 重建后所有控件位置改变，继续停留极易误触（测试实证）：
+              // 收起面板让用户在新布局下按需重新进入
+              this.settingsVisible = false;
+              promptAction.showToast({ message: value ? '已开启关怀模式，界面与网页文字已放大' : '已返回标准模式' });
             } else if (key === 'readingTheme') {
               // 阅读模式（羊皮卷主题）：切主题并整树重建
               this.readingTheme = value;
