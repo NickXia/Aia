@@ -1434,6 +1434,29 @@ struct Index {
     });
   }
 
+  /**
+   * 清理全部标签页的 WebView 缓存（内存 + 磁盘离线缓存）。
+   * 浏览器是应用数据膨胀的主因：HTTP 缓存/离线资源随浏览无限增长。
+   * 只清缓存，不动 Cookie 与 localStorage——登录态不受影响。
+   * 无痕标签走内存态，无可清理，跳过即可。
+   */
+  private clearWebCache(): void {
+    let cleared: number = 0;
+    for (let i = 0; i < this.tabs.length; i++) {
+      const ctrl: webview.WebviewController | null = this.tabs[i].controller;
+      if (ctrl === null) {
+        continue;
+      }
+      try {
+        ctrl.clearCache(true);
+        cleared++;
+      } catch (err) {
+        // 标签正在加载等场景可能失败：跳过该标签
+      }
+    }
+    promptAction.showToast({ message: cleared > 0 ? '网页缓存已清理' : '暂无可清理的缓存，请先打开任意网页' });
+  }
+
   private async copyUrl(): Promise<void> {
     const url: string = this.activeTab().url;
     if (url.length === 0) {
@@ -1926,6 +1949,9 @@ struct Index {
             this.history = [];
             AiaStore.clearHistory();
             promptAction.showToast({ message: '浏览记录已清除' });
+          },
+          onClearCache: (): void => {
+            this.clearWebCache();
           },
           onPickBackground: (): void => {
             this.pickBackground();

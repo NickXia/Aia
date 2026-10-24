@@ -1,0 +1,14 @@
+# Aia release 混淆规则（保守配置，保证现有逻辑零风险）
+#
+# 说明：刻意不开启 -enable-property-obfuscation / -enable-toplevel-obfuscation。
+# 原因：Storage.ets 的 JSON 序列化涉及对象字面量与 Record 字符串键
+# （书签/历史/下载记录的存取往返），属性混淆对字面量键的重命名行为
+# 与旧数据兼容性存在风险。当前应用源码仅约 200KB，属性混淆的减包收益
+# （几十 KB）远小于数据丢失风险，不值得。
+
+# 删除 release 包中的 console.* 日志：全项目数十处日志调用，
+# 每次页面加载都会输出多条，删掉可减小 abc 体积并消除运行时开销
+-remove-log
+
+# 文件名混淆：安全，无反射/动态加载
+-enable-filename-obfuscation

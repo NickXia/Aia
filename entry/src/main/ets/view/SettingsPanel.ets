@@ -36,6 +36,9 @@ export struct SettingsPanel {
   };
   onClearBackground: () => void = () => {
   };
+  /** 清理 WebView 磁盘缓存（不影响 Cookie/登录态/书签） */
+  onClearCache: () => void = () => {
+  };
   onClose: () => void = () => {
   };
 
@@ -450,6 +453,28 @@ export struct SettingsPanel {
               .width('100%')
               .height(46)
               .onClick(() => this.onClearHistory())
+
+              Divider().color(C('divider')).strokeWidth(0.5)
+
+              Row() {
+                Column({ space: 2 }) {
+                  Text('清理网页缓存')
+                    .fontSize(ZFont.body)
+                    .fontColor(C('text_primary'))
+                    .width('100%')
+                    .textAlign(TextAlign.Start)
+                  Text('释放网页图片等离线缓存，不影响登录状态与书签')
+                    .fontSize(Math.round(10 * getUiScale()))
+                    .fontColor(C('text_tertiary'))
+                    .width('100%')
+                    .textAlign(TextAlign.Start)
+                }
+                .layoutWeight(1)
+                .alignItems(HorizontalAlign.Start)
+              }
+              .width('100%')
+              .height(46)
+              .onClick(() => this.onClearCache())
             }
             .width('100%')
             .padding({ left: 14, right: 14 })
