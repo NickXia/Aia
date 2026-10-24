@@ -1,5 +1,4 @@
 import { ENGINES, SearchEngine } from '../common/SearchEngine';
-import { prettyUrl } from '../common/UrlUtils';
 import { fileUri } from '@kit.CoreFileKit';
 import { ZFont, ZRadius, ZSpace, getUiScale } from '../common/AiaTheme';
 import { C } from '../common/AiaTheme';
@@ -10,7 +9,6 @@ import { C } from '../common/AiaTheme';
 @Component
 export struct SettingsPanel {
   @Prop engineName: string;
-  @Prop homepage: string;
   @Prop blockImages: boolean;
   @Prop saveHistory: boolean;
   @Prop jsEnabled: boolean;
@@ -18,7 +16,6 @@ export struct SettingsPanel {
   @Prop bgPath: string;
   @Prop elderMode: boolean;
   @Prop readingTheme: boolean;
-  @Prop desktopUA: boolean;
   @Prop debugH5: boolean;
   @Prop downloadAskMode: boolean;
   /** 已授权下载文件夹的展示名（空串=未选定） */
@@ -330,21 +327,6 @@ export struct SettingsPanel {
             this.sectionTitle('搜索');
             Column() {
               this.engineRow()
-              Divider().color(C('divider')).strokeWidth(0.5)
-              Row() {
-                Text('主页')
-                  .fontSize(ZFont.body)
-                  .fontColor(C('text_primary'))
-                  .layoutWeight(1)
-                  .textAlign(TextAlign.Start)
-                Text(prettyUrl(this.homepage))
-                  .fontSize(ZFont.footnote)
-                  .fontColor(C('text_secondary'))
-                  .maxLines(1)
-                  .constraintSize({ maxWidth: '55%' })
-              }
-              .width('100%')
-              .height(46)
             }
             .width('100%')
             .padding({ left: 14, right: 14 })
@@ -357,8 +339,7 @@ export struct SettingsPanel {
               this.switchRow('阻止图片加载', '省流量，弱网下更快', this.blockImages, 'blockImages', false)
               this.switchRow('保存浏览记录', '', this.saveHistory, 'saveHistory', false)
               this.switchRow('允许 JavaScript', '关闭后部分网页无法正常显示', this.jsEnabled, 'js', false)
-              this.switchRow('桌面版网页', '以电脑版方式浏览网页', this.desktopUA, 'desktopUA', false)
-            this.switchRow('H5 远程调试', '开启后可用 PC Chrome 调试网页（见下方说明）', this.debugH5, 'debugH5', true)
+              this.switchRow('H5 远程调试', '开启后可用 PC Chrome 调试网页（见下方说明）', this.debugH5, 'debugH5', true)
 
             if (this.debugH5) {
               Column({ space: 4 }) {

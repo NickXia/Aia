@@ -22,7 +22,6 @@ const STORE_NAME: string = 'aia_store';
 const KEY_BOOKMARKS: string = 'bookmarks';
 const KEY_HISTORY: string = 'history';
 const KEY_ENGINE: string = 'engine_index';
-const KEY_HOMEPAGE: string = 'homepage';
 const KEY_BLOCK_IMAGES: string = 'block_images';
 const KEY_SAVE_HISTORY: string = 'save_history';
 const KEY_JAVASCRIPT: string = 'javascript';
@@ -31,7 +30,6 @@ const KEY_BG_IMAGE: string = 'bg_image';
 const KEY_ELDER: string = 'elder_mode';
 const KEY_READING: string = 'reading_theme';
 const KEY_DOWNLOADS: string = 'downloads';
-const KEY_DESKTOP_UA: string = 'desktop_ua';
 const KEY_DEBUG_H5: string = 'debug_h5';
 const KEY_ASK_MODE: string = 'download_ask_mode';
 const KEY_ASKED: string = 'download_asked';
@@ -152,14 +150,6 @@ export class AiaStore {
 
   static set engineIndex(v: number) {
     AiaStore.put(KEY_ENGINE, v);
-  }
-
-  static get homepage(): string {
-    return AiaStore.getString(KEY_HOMEPAGE, 'https://www.baidu.com');
-  }
-
-  static set homepage(v: string) {
-    AiaStore.put(KEY_HOMEPAGE, v);
   }
 
   static get blockImages(): boolean {
@@ -335,14 +325,6 @@ export class AiaStore {
 
   static set debugH5(v: boolean) {
     AiaStore.put(KEY_DEBUG_H5, v);
-  }
-
-  static get desktopUA(): boolean {
-    return AiaStore.getBool(KEY_DESKTOP_UA, false);
-  }
-
-  static set desktopUA(v: boolean) {
-    AiaStore.put(KEY_DESKTOP_UA, v);
   }
 
   /** 保留最近 50 条下载记录 */

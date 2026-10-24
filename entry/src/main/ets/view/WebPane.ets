@@ -29,29 +29,13 @@ export struct WebPane {
   @Prop debugH5: boolean = false;
   /** 阅读模式（羊皮卷）：给网页内容注入暖色滤镜 */
   @Prop readingTheme: boolean;
-  /** 桌面版 UA：切换后对当前 Web 上下文生效 */
-  @Prop @Watch('applyUa') desktopUA: boolean;
+  /** 关怀模式：应用 UI 放大的同时，网页文字按比例放大（textZoomRatio） */
+  @Prop elderMode: boolean = false;
   /** 下载导航错误忽略状态：Index 构造时按引用传入（ADR-2，不走 AppStorage） */
   dlGate: DownloadNavGate = new DownloadNavGate();
   /** 下载委托：Index 构造时直接传入注册（ADR-2，不走 AppStorage） */
   downloadDelegate: webview.WebDownloadDelegate | null = null;
 
-  private applyUa(): void {
-    try {
-      if (this.desktopUA) {
-        this.controller.setCustomUserAgent(
-          'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36');
-        if (this.tab.url.length > 0) {
-          this.controller.refresh();
-        }
-      } else if (this.defaultUa.length > 0) {
-        // 关闭桌面模式：恢复伪装的标准手机 UA（不用内核默认——带 ArkWeb 会被风控 403）
-        this.controller.setCustomUserAgent('Mozilla/5.0 (Linux; Android 12) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Mobile Safari/537.36');
-      }
-    } catch (err) {
-      // ignore
-    }
-  }
   onPageStart: (tab: BrowserTab) => void = () => {
   };
   onPageFinished: (tab: BrowserTab) => void = () => {
@@ -61,8 +45,6 @@ export struct WebPane {
   };
 
   private controller: webview.WebviewController = new webview.WebviewController();
-  /** 内核默认 UA（onControllerAttached 时记录），关闭桌面模式时恢复 */
-  private defaultUa: string = '';
 
   /** 阅读模式滤镜：页面加载完成后注入，近似羊皮纸效果 */
   private applyReadingFilter(): void {
@@ -117,6 +99,8 @@ export struct WebPane {
       .fileAccess(false)
       .geolocationAccess(false)
       .zoomAccess(true)
+      // 关怀模式：网页文字放大 125%（与应用 UI 的 1.25 缩放因子一致），标准模式 100%
+      .textZoomRatio(this.elderMode ? 125 : 100)
       .horizontalScrollBarAccess(false)
       .verticalScrollBarAccess(false)
       .onControllerAttached(() => {
@@ -132,11 +116,8 @@ export struct WebPane {
         }
         try {
           // 内核默认 UA 带 ArkWeb 标识——知乎/B站/微博风控直接 403（白屏假象"网络差"）。
-          // 伪装标准 Android Chrome 移动 UA（浏览器行业惯例），桌面模式用桌面 UA
-          this.defaultUa = this.controller.getUserAgent();
-          this.controller.setCustomUserAgent(this.desktopUA
-            ? 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36'
-            : 'Mozilla/5.0 (Linux; Android 12) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Mobile Safari/537.36');
+          // 固定伪装标准 Android Chrome 移动 UA（浏览器行业惯例）
+          this.controller.setCustomUserAgent('Mozilla/5.0 (Linux; Android 12) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Mobile Safari/537.36');
         } catch (err) {
           // ignore
         }

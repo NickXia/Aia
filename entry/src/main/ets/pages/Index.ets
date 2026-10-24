@@ -33,7 +33,6 @@ struct Index {
   @State history: HistoryEntry[] = [];
 
   @State engineIndex: number = 0;
-  @State homepage: string = 'https://www.baidu.com';
   @State blockImages: boolean = false;
   @State saveHistory: boolean = true;
   @State jsEnabled: boolean = true;
@@ -65,7 +64,6 @@ struct Index {
   @StorageLink('launchUrl') @Watch('onLaunchUrl') launchUrl: string = '';
   @State downloads: DownloadItem[] = AiaStore.loadDownloads();
   @State downloadsVisible: boolean = false;
-  @State desktopUA: boolean = AiaStore.desktopUA;
   @State debugH5: boolean = AiaStore.debugH5;
   @State downloadAskMode: boolean = AiaStore.downloadAskMode;
   private downloadDelegate: webview.WebDownloadDelegate = new webview.WebDownloadDelegate();
@@ -88,7 +86,6 @@ struct Index {
   // -------------------------------------------------------------- 生命周期
   aboutToAppear(): void {
     this.engineIndex = AiaStore.engineIndex;
-    this.homepage = AiaStore.homepage;
     this.blockImages = AiaStore.blockImages;
     this.saveHistory = AiaStore.saveHistory;
     this.jsEnabled = AiaStore.javaScriptEnabled;
@@ -101,7 +98,6 @@ struct Index {
       setUiScale(1.25);
     }
     // 阅读模式（羊皮卷主题）
-    this.desktopUA = AiaStore.desktopUA;
     this.debugH5 = AiaStore.debugH5;
     this.downloadAskMode = AiaStore.downloadAskMode;
     this.readingTheme = AiaStore.readingTheme;
@@ -1712,7 +1708,7 @@ struct Index {
               blockImages: this.blockImages,
               jsEnabled: this.jsEnabled,
               doNotTrack: this.dnt,
-              desktopUA: this.desktopUA,
+              elderMode: this.elderMode,
               readingTheme: this.readingTheme,
               debugH5: this.debugH5,
               dlGate: this.dlGate,
@@ -1867,12 +1863,10 @@ struct Index {
       if (this.settingsVisible) {
         SettingsPanel({
           engineName: ENGINES[this.engineIndex].name,
-          homepage: this.homepage,
           blockImages: this.blockImages,
           saveHistory: this.saveHistory,
           jsEnabled: this.jsEnabled,
           dnt: this.dnt,
-          desktopUA: this.desktopUA,
           debugH5: this.debugH5,
           downloadAskMode: this.downloadAskMode,
           downloadDirName: this.downloadDirName(),
@@ -1892,10 +1886,6 @@ struct Index {
             } else if (key === 'dnt') {
               this.dnt = value;
               AiaStore.doNotTrack = value;
-            } else if (key === 'desktopUA') {
-              this.desktopUA = value;
-              AiaStore.desktopUA = value;
-              promptAction.showToast({ message: value ? '已切换桌面版网页' : '已恢复手机版网页' });
             } else if (key === 'askMode') {
               this.downloadAskMode = value;
               AiaStore.downloadAskMode = value;
