@@ -1342,8 +1342,10 @@ struct Index {
     if (this.downloadDirUri.length === 0) {
       return '';
     }
-    // 文档提供方 URI 形如 datashareproxy://<bundle>/...（authority 后可能无路径），
-    // 直接取末段会得到包名；先剥掉 scheme+authority，仅从路径段取文件夹名
+    // 文件选择器返回形如 file://docs/storage/Users/currentUser/Download/com.aia.browser
+    // 的委托目录 URI（系统为应用生成的子目录名就是包名）。只取末段会显示成
+    // 内部包名，对用户无意义——展示 currentUser 之后的可见路径，包名段
+    // 拼上父目录（Download/com.aia.browser），其余场景取末段。
     let raw: string = this.downloadDirUri;
     try {
       raw = decodeURIComponent(raw);
@@ -1356,9 +1358,26 @@ struct Index {
       const pathStart: number = raw.indexOf('/');
       raw = pathStart >= 0 ? raw.substring(pathStart + 1) : '';
     }
+    const marker: string = 'Users/currentUser/';
+    const markerIdx: number = raw.indexOf(marker);
+    if (markerIdx >= 0) {
+      raw = raw.substring(markerIdx + marker.length);
+    }
     const segs: string[] = raw.split('/').filter((s: string) => s.length > 0);
-    const name: string = segs.length > 0 ? segs[segs.length - 1] : '';
-    return name.length > 0 ? name : '已选文件夹';
+    let name: string = segs.length > 0 ? segs[segs.length - 1] : '';
+    if (name.length === 0) {
+      return '已选文件夹';
+    }
+    let bundleName: string = '';
+    try {
+      bundleName = (getContext(this) as common.UIAbilityContext).applicationInfo.name;
+    } catch (err) {
+      // ignore
+    }
+    if (name === bundleName && segs.length >= 2) {
+      name = segs[segs.length - 2] + '/' + name;
+    }
+    return name;
   }
 
   /** 设置面板「更改/去选择」：重新拉起文件夹选择器 */
