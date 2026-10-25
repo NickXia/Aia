@@ -488,7 +488,9 @@ export struct SettingsPanel {
               .padding({ top: 18, bottom: 10 })
           }
           .width('100%')
-          .padding({ left: ZSpace.page, right: ZSpace.page })
+          // 底部避让：面板贴底且无手势条内边距，末尾行不加缓冲会被
+          // 屏幕底缘（三键/手势区）拦截点击（实测「清理网页缓存」y>2600 点不到）
+          .padding({ left: ZSpace.page, right: ZSpace.page, bottom: 72 })
         }
         .layoutWeight(1)
         .scrollBar(BarState.Off)

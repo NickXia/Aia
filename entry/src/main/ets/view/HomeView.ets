@@ -1,6 +1,8 @@
 import { colorForHost, hostOf, prettyUrl } from '../common/UrlUtils';
 import { ZFont, getUiScale } from '../common/AiaTheme';
 import { C } from '../common/AiaTheme';
+import { HistoryEntry } from '../model/Models';
+import { SuggestList } from './SuggestList';
 
 /**
  * 新标签页（Aia 主页）—— Via 式极简：
@@ -10,6 +12,8 @@ import { C } from '../common/AiaTheme';
 export struct HomeView {
   onOpen: (url: string) => void = () => {
   };
+  /** 浏览历史：供搜索框联想下拉（普通属性即可，输入期间不会变化） */
+  history: HistoryEntry[] = [];
   @State searchText: string = '';
 
   /** 回车提交：非空才导航，提交后清空输入框 */
@@ -54,6 +58,18 @@ export struct HomeView {
             this.searchText = value;
           })
           .onSubmit(() => this.submit())
+
+        // 联想下拉：输入非空且有历史命中时出现，点按直达
+        if (this.searchText.trim().length > 0 && this.history.length > 0) {
+          SuggestList({
+            entries: this.history,
+            keyword: this.searchText,
+            onPick: (url: string) => {
+              this.searchText = '';
+              this.onOpen(url);
+            }
+          })
+        }
       }
       .width('82%')
       .margin({ bottom: 96 })

@@ -1,7 +1,8 @@
 import { prettyUrl, isSecure } from '../common/UrlUtils';
-import { BrowserTab } from '../model/Models';
+import { BrowserTab, HistoryEntry } from '../model/Models';
 import { ZFont, ZRadius, ZSize, getUiScale } from '../common/AiaTheme';
 import { C } from '../common/AiaTheme';
+import { SuggestList } from './SuggestList';
 
 /**
  * 顶部搜索栏：地址胶囊（编辑态变输入框）+ 加载进度条。
@@ -12,6 +13,9 @@ import { C } from '../common/AiaTheme';
 export struct AddressBar {
   @ObjectLink tab: BrowserTab;
   @Prop home: boolean;
+  /** 浏览历史：编辑态输入时供联想下拉。@Prop 保证父→子初始化可靠
+   * （普通成员在本组件上实测未被赋值，HomeView 同模式却正常，不深究） */
+  @Prop history: HistoryEntry[] = [];
 
   onSubmit: (text: string) => void = () => {
   };
@@ -122,6 +126,7 @@ export struct AddressBar {
         .onClick(() => {
           this.editing = false;
         })
+
     }
     .width('100%')
   }
@@ -136,26 +141,47 @@ export struct AddressBar {
   }
 
   build() {
-    Stack({ alignContent: Alignment.BottomStart }) {
-      Row() {
-        if (this.editing) {
-          this.editor();
-        } else {
-          this.pill();
+    Stack({ alignContent: Alignment.TopStart }) {
+      Stack({ alignContent: Alignment.BottomStart }) {
+        Row() {
+          if (this.editing) {
+            this.editor();
+          } else {
+            this.pill();
+          }
+        }
+        .width('100%')
+        .height(ZSize.toolbar)
+        .padding({ left: 10, right: 10 })
+
+        // 加载进度：贴着底部分隔线。导航一开始就显示（最窄 4%），
+        // 由 @ObjectLink 实时驱动，完成即消失
+        if (!this.home && this.tab.isLoading) {
+          Row()
+            .height(2)
+            .width(Math.max(this.tab.progress, 4) + '%')
+            .backgroundColor(C('accent'))
+            .borderRadius(1)
         }
       }
       .width('100%')
-      .height(ZSize.toolbar)
-      .padding({ left: 10, right: 10 })
 
-      // 加载进度：贴着底部分隔线。导航一开始就显示（最窄 4%），
-      // 由 @ObjectLink 实时驱动，完成即消失
-      if (!this.home && this.tab.isLoading) {
-        Row()
-          .height(2)
-          .width(Math.max(this.tab.progress, 4) + '%')
-          .backgroundColor(C('accent'))
-          .borderRadius(1)
+      // 编辑态联想下拉：绝对定位覆盖在网页内容上方（不参与布局、
+      // 不挤压页面），顶部让出工具栏高度。选中即导航并退出编辑态
+      if (this.editing && this.draft.trim().length > 0 && this.history.length > 0) {
+        Column() {
+          SuggestList({
+            entries: this.history,
+            keyword: this.draft,
+            onPick: (url: string) => {
+              this.draft = '';
+              this.editing = false;
+              this.onSubmit(url);
+            }
+          })
+        }
+        .width('100%')
+        .position({ x: 0, y: ZSize.toolbar })
       }
     }
     .width('100%')

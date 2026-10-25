@@ -115,12 +115,6 @@ export class DownloadNavGate {
 }
 
 /** 主页快捷方式 */
-export interface DialItem {
-  name: string;
-  url: string;
-  color: string;
-}
-
 /** 下载任务状态：progressing / paused / done / failed / canceled */
 @Observed
 export class DownloadItem {

@@ -6,7 +6,7 @@ import { DownloadsPanel } from '../view/DownloadsPanel';
 import { DownloadItem } from '../model/Models';
 import { pasteboard, BusinessError } from '@kit.BasicServicesKit';
 import { photoAccessHelper } from '@kit.MediaLibraryKit';
-import { BrowserTab, Bookmark, HistoryEntry, TabInfo, DialItem, DownloadNavGate } from '../model/Models';
+import { BrowserTab, Bookmark, HistoryEntry, TabInfo, DownloadNavGate } from '../model/Models';
 import { ENGINES, SearchEngine } from '../common/SearchEngine';
 import { hostOf, resolveInput, isSecure, colorForHost, sanitizeFileName } from '../common/UrlUtils';
 import { AiaStore } from '../common/Storage';
@@ -17,7 +17,6 @@ import { AddressBar } from '../view/AddressBar';
 import { BottomBar } from '../view/BottomBar';
 import { MenuSheet } from '../view/MenuSheet';
 import { TabsPanel } from '../view/TabsPanel';
-import { DialEditSheet } from '../view/DialEditSheet';
 import { RecordsPanel } from '../view/RecordsPanel';
 import { SettingsPanel } from '../view/SettingsPanel';
 
@@ -48,10 +47,12 @@ struct Index {
   @State recordsVisible: boolean = false;
   @State settingsVisible: boolean = false;
   @State recordsMode: string = 'bookmark';
+  /** 「关闭全部」撤销：被关标签的会话内备份（不落盘，杀进程即弃） */
+  private closedTabsBackup: BrowserTab[] = [];
+  @State undoVisible: boolean = false;
+  @State undoCount: number = 0;
+  private undoTimerId: number = -1;
   @State elderMode: boolean = false;
-  @State dials: DialItem[] = [];
-  @State dialEditorVisible: boolean = false;
-  @State dialEditing: DialItem | null = null;
   /** 递增以整树重建 UI（关怀模式切换字号后必须重建才能生效） */
   @State uiEpoch: number = 0;
   /** 阅读模式（羊皮卷主题） */
@@ -91,7 +92,6 @@ struct Index {
     this.jsEnabled = AiaStore.javaScriptEnabled;
     this.dnt = AiaStore.doNotTrack;
     this.bgImage = AiaStore.bgImage;
-    this.dials = AiaStore.loadDials();
     // 关怀模式：先设缩放因子再建 UI，首帧即是大字版
     this.elderMode = AiaStore.elderMode;
     if (this.elderMode) {
@@ -480,6 +480,8 @@ struct Index {
       AiaStore.saveHistoryList(kept);
     }
 
+    // 冷启动固定回主页：先建一个空标签（主页态），否则 tabs 为空、
+    // 主页导航会落到不在列表中的占位标签上，Web 组件无法加载
     const first: BrowserTab = this.newTab();
     this.activeId = first.id;
     this.showHome = true;
@@ -522,7 +524,7 @@ struct Index {
 
   /** 空白页看门狗：非主页状态下停留在占位页且无加载活动 → 自愈回主页 */
   private blankWatchdog(): void {
-    if (this.showHome || this.activeTab().loadFailed || this.dialEditorVisible || this.menuVisible
+    if (this.showHome || this.activeTab().loadFailed || this.menuVisible
       || this.settingsVisible || this.recordsVisible || this.tabsVisible) {
       return;
     }
@@ -592,10 +594,6 @@ struct Index {
   }
 
   onBackPress(): boolean {
-    if (this.dialEditorVisible) {
-      this.dialEditorVisible = false;
-      return true;
-    }
     if (this.menuVisible) {
       this.menuVisible = false;
       return true;
@@ -741,12 +739,46 @@ struct Index {
   }
 
   private closeAllTabs(): void {
+    // 只备份真正浏览过的标签（主页态标签无内容可还原）
+    this.closedTabsBackup = this.tabs.filter((t: BrowserTab) => t.url.length > 0);
+    if (this.undoTimerId !== -1) {
+      clearTimeout(this.undoTimerId);
+      this.undoTimerId = -1;
+    }
+    if (this.closedTabsBackup.length > 0) {
+      this.undoCount = this.closedTabsBackup.length;
+      this.undoVisible = true;
+      // 6 秒后自动收起；期间再次关闭全部则重新计时并覆盖备份
+      this.undoTimerId = setTimeout(() => {
+        this.undoVisible = false;
+        this.undoTimerId = -1;
+      }, 6000);
+    } else {
+      this.undoVisible = false;
+    }
     // 直接换成一个全新的标签，旧的 Web 组件由 ForEach 回收
     const fresh: BrowserTab = new BrowserTab(this.nextId());
     this.tabs = [fresh];
     this.activeId = fresh.id;
     this.showHome = true;
     this.tabsVisible = false;
+  }
+
+  /** 撤销「关闭全部」：原样还原标签（含无痕），激活最后一个 */
+  private undoCloseAll(): void {
+    if (this.undoTimerId !== -1) {
+      clearTimeout(this.undoTimerId);
+      this.undoTimerId = -1;
+    }
+    this.undoVisible = false;
+    if (this.closedTabsBackup.length === 0) {
+      return;
+    }
+    this.tabs = this.closedTabsBackup;
+    const last: BrowserTab = this.tabs[this.tabs.length - 1];
+    this.activeId = last.id;
+    this.showHome = last.url.length === 0;
+    this.closedTabsBackup = [];
   }
 
   // -------------------------------------------------------------- 页面导航
@@ -1565,51 +1597,6 @@ struct Index {
     AiaStore.bgImage = '';
   }
 
-  // ------------------------------------------------------ 快捷方式编辑
-  private saveDial(name: string, url: string): void {
-    if (name.length === 0 || url.length === 0) {
-      promptAction.showToast({ message: '名称和网址都不能为空' });
-      return;
-    }
-    let target: string = url;
-    if (!/^https?:\/\//.test(target)) {
-      target = 'https://' + target;
-    }
-    const color: string = colorForHost(hostOf(target));
-    const d: DialItem = { name: name, url: target, color: color };
-    const list: DialItem[] = this.dials;
-    if (this.dialEditing !== null) {
-      for (let i = 0; i < list.length; i++) {
-        if (list[i].url === this.dialEditing.url) {
-          list[i] = d;
-          break;
-        }
-      }
-    } else {
-      list.push(d);
-    }
-    this.dials = list;
-    AiaStore.saveDials(list);
-    this.dialEditorVisible = false;
-    promptAction.showToast({ message: '已保存' });
-  }
-
-  private deleteDial(): void {
-    if (this.dialEditing === null) {
-      return;
-    }
-    const list: DialItem[] = [];
-    for (let i = 0; i < this.dials.length; i++) {
-      if (this.dials[i].url !== this.dialEditing.url) {
-        list.push(this.dials[i]);
-      }
-    }
-    this.dials = list;
-    AiaStore.saveDials(list);
-    this.dialEditorVisible = false;
-    promptAction.showToast({ message: '已删除' });
-  }
-
   /** 网页加载失败后的重试 */
   private retryActive(): void {
     const tab: BrowserTab = this.activeTab();
@@ -1731,8 +1718,11 @@ struct Index {
           AddressBar({
             tab: this.activeTab(),
             home: this.showHome,
+            history: this.history,
             onSubmit: (text: string) => this.navigate(text)
           })
+            // 编辑态联想下拉用绝对定位溢出本组件，必须抬高 z 序盖住网页
+            .zIndex(3)
         }
 
         // 顶对齐：省流提示条浮在网页内容顶部，WebPane/HomeView 均满幅不受影响
@@ -1757,7 +1747,8 @@ struct Index {
 
           if (this.showHome) {
             HomeView({
-              onOpen: (url: string) => this.navigate(url)
+              onOpen: (url: string) => this.navigate(url),
+              history: this.history
             })
           }
 
@@ -1790,6 +1781,30 @@ struct Index {
                     }
                   }
                 })
+            }
+            .width('100%')
+            .padding({ left: 14, right: 14, top: 7, bottom: 7 })
+            .backgroundColor(C('surface_alt_2'))
+          }
+
+          // 「关闭全部」撤销条：6 秒内可一键还原被关标签。
+          // 与省流条互斥场景（撤销条出现在关闭后的主页态），不会同时展示
+          if (this.undoVisible) {
+            Row({ space: 10 }) {
+              Text('已关闭 ' + this.undoCount + ' 个标签')
+                .fontSize(12)
+                .fontColor(C('text_secondary'))
+                .layoutWeight(1)
+                .textAlign(TextAlign.Start)
+                .maxLines(1)
+
+              Text('撤销')
+                .fontSize(13)
+                .fontColor(C('accent'))
+                .padding({ left: 10, right: 10, top: 5, bottom: 5 })
+                .borderRadius(12)
+                .backgroundColor(C('surface_alt'))
+                .onClick(() => this.undoCloseAll())
             }
             .width('100%')
             .padding({ left: 14, right: 14, top: 7, bottom: 7 })
@@ -1916,19 +1931,6 @@ struct Index {
         .width('100%')
         .height('100%')
         .justifyContent(FlexAlign.Center)
-      }
-
-      if (this.dialEditorVisible) {
-        DialEditSheet({
-          isEditing: this.dialEditing !== null,
-          editName: this.dialEditing !== null ? this.dialEditing.name : '',
-          editUrl: this.dialEditing !== null ? this.dialEditing.url : '',
-          onSave: (name: string, url: string) => this.saveDial(name, url),
-          onDelete: () => this.deleteDial(),
-          onClose: () => {
-            this.dialEditorVisible = false;
-          }
-        })
       }
 
       if (this.settingsVisible) {
