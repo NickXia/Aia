@@ -1,4 +1,4 @@
-import { promptAction } from '@kit.ArkUI';
+import { promptAction, window } from '@kit.ArkUI';
 import { webview } from '@kit.ArkWeb';
 import { picker, fileUri, fileIo, fileShare } from '@kit.CoreFileKit';
 import { common, Want, wantConstant } from '@kit.AbilityKit';
@@ -65,6 +65,9 @@ struct Index {
   @StorageLink('launchUrl') @Watch('onLaunchUrl') launchUrl: string = '';
   @State downloads: DownloadItem[] = AiaStore.loadDownloads();
   @State downloadsVisible: boolean = false;
+  /** 网页视频全屏中（活动标签）：隐藏地址栏/底栏让 Web 组件占满窗口——
+   *  ArkWeb 的全屏层只覆盖 Web 组件区域，不藏工具栏的话横屏视频会被挤成一小块 */
+  @State webFullscreen: boolean = false;
   @State debugH5: boolean = AiaStore.debugH5;
   @State downloadAskMode: boolean = AiaStore.downloadAskMode;
   private downloadDelegate: webview.WebDownloadDelegate = new webview.WebDownloadDelegate();
@@ -615,6 +618,13 @@ struct Index {
       return true;
     }
     const tab: BrowserTab = this.activeTab();
+    console.info('AiaBack onBackPress webFs=' + this.webFullscreen);
+    // Aia 自管视频全屏中：返回键先退全屏，不能让系统返回直接退网页历史——
+    // 否则用户被留在全屏里却发生了历史后退
+    if (this.webFullscreen) {
+      this.exitWebFullscreen();
+      return true;
+    }
     if (!this.showHome && tab.controller !== null) {
       try {
         // 实时查询，避免状态滞后导致系统返回失效
@@ -666,7 +676,32 @@ struct Index {
     return infos;
   }
 
+  /** 切走标签/新建标签前：若当前在网页全屏，先退全屏（恢复窗口方向+工具栏），
+   *  防止全屏态残留到另一个标签上（视频还锁横屏、工具栏消失） */
+  private deactivateWebFullscreen(): void {
+    if (this.webFullscreen) {
+      this.exitWebFullscreen();
+    }
+  }
+
+  /** Aia 自管视频全屏的统一退出：恢复窗口方向跟随系统 + 恢复工具栏布局。
+   *  自管模式下内核全屏层在进入瞬间就已退掉，没有句柄可用，直接操作窗口 */
+  private async exitWebFullscreen(): Promise<void> {
+    this.webFullscreen = false;
+    try {
+      const ctx: common.Context | undefined = this.getUIContext().getHostContext();
+      if (ctx === undefined) {
+        return;
+      }
+      const win: window.Window = await window.getLastWindow(ctx);
+      await win.setPreferredOrientation(window.Orientation.UNSPECIFIED);
+    } catch (err) {
+      console.info('AiaIndex restoreOrientation failed');
+    }
+  }
+
   private createTab(): void {
+    this.deactivateWebFullscreen();
     const tab: BrowserTab = this.newTab();
     this.activeId = tab.id;
     this.showHome = true;
@@ -676,6 +711,7 @@ struct Index {
   /** 网页 target=_blank 的新窗口：在新标签打开并立即激活；无痕标签里弹出的新窗口继承无痕 */
   private openInNewTab(url: string, incognito: boolean): void {
     console.info('AiaNav openInNewTab ' + url);
+    this.deactivateWebFullscreen();
     const tab: BrowserTab = this.newTab();
     tab.incognito = incognito;
     tab.url = url;
@@ -690,6 +726,9 @@ struct Index {
   }
 
   private activate(id: string): void {
+    if (id !== this.activeId) {
+      this.deactivateWebFullscreen();
+    }
     this.activeId = id;
     this.showHome = this.tabById(id).url.length === 0;
     this.tabsVisible = false;
@@ -1713,8 +1752,8 @@ struct Index {
 
       Column() {
         // 首页隐藏顶部地址栏（Via 式）：首页有自己的居中搜索框，
-        // 顶部栏只在网页态出现
-        if (!this.showHome) {
+        // 顶部栏只在网页态出现；网页视频全屏时同样隐藏，让视频占满窗口
+        if (!this.showHome && !this.webFullscreen) {
           AddressBar({
             tab: this.activeTab(),
             home: this.showHome,
@@ -1741,7 +1780,10 @@ struct Index {
               downloadDelegate: this.downloadDelegate,
               onPageStart: (t: BrowserTab) => this.handlePageStart(t),
               onPageFinished: (t: BrowserTab) => this.handlePageFinished(t),
-              onNewWindow: (url: string, incognito: boolean) => this.openInNewTab(url, incognito)
+              onNewWindow: (url: string, incognito: boolean) => this.openInNewTab(url, incognito),
+              onFullscreenChange: (inFull: boolean) => {
+                this.webFullscreen = inFull;
+              }
             })
           }, (tab: BrowserTab) => tab.id)
 
@@ -1822,10 +1864,33 @@ struct Index {
           tabCount: this.tabs.length,
           onAction: (action: string) => this.handleAction(action)
         })
+          // 视频全屏时隐藏底栏：全屏层只覆盖 Web 区域，不藏底栏视频铺不满
+          .visibility(this.webFullscreen ? Visibility.None : Visibility.Visible)
       }
       .width('100%')
       .height('100%')
-      .padding({ top: this.topAvoid, bottom: this.bottomAvoid })
+      // 视频全屏时连避让区一起去掉，画面真正铺到屏幕边缘
+      .padding(this.webFullscreen
+        ? { top: 0, bottom: 0 }
+        : { top: this.topAvoid, bottom: this.bottomAvoid })
+
+      // 视频全屏悬浮退出按钮：全屏时返回键被 Web 内核消费（onBackPress 收不到），
+      // 必须给一个不依赖返回键的退出出口（半透明 chip，点它走 exitFullScreen）
+      if (this.webFullscreen) {
+        Row() {
+          Text('✕ 退出全屏')
+            .fontSize(13)
+            .fontColor('#FFFFFF')
+        }
+        .padding({ left: 14, right: 14, top: 8, bottom: 8 })
+        .borderRadius(18)
+        .backgroundColor('rgba(0,0,0,0.55)')
+        .position({ x: '68%', y: 36 })
+        .zIndex(9)
+        .onClick(() => {
+          this.exitWebFullscreen();
+        })
+      }
 
       if (this.menuVisible) {
         MenuSheet({

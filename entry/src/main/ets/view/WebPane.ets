@@ -1,6 +1,7 @@
 import { webview } from '@kit.ArkWeb';
 import { common, bundleManager } from '@kit.AbilityKit';
-import { promptAction } from '@kit.ArkUI';
+import { promptAction, window } from '@kit.ArkUI';
+import { BusinessError } from '@kit.BasicServicesKit';
 import { BrowserTab, DownloadNavGate } from '../model/Models';
 import {
   classifyLoadError, decideDeepLink, isMainDocHttpError,
@@ -36,12 +37,34 @@ export struct WebPane {
   /** 下载委托：Index 构造时直接传入注册（ADR-2，不走 AppStorage） */
   downloadDelegate: webview.WebDownloadDelegate | null = null;
 
+  /**
+   * 设置主窗口方向（视频全屏横屏适配）。
+   * ArkWeb 的全屏不会自动旋转窗口：H5 视频全屏后画面仍锁在竖屏里信箱化，
+   * 必须应用层主动 setPreferredOrientation。失败静默（无窗口权限等场景不影响浏览）。
+   */
+  private async setWindowOrientation(o: window.Orientation): Promise<void> {
+    try {
+      const ctx: common.Context | undefined = this.getUIContext().getHostContext();
+      if (ctx === undefined) {
+        return;
+      }
+      const win: window.Window = await window.getLastWindow(ctx);
+      await win.setPreferredOrientation(o);
+    } catch (err) {
+      console.info('AiaWeb setOrientation failed');
+    }
+  }
+
   onPageStart: (tab: BrowserTab) => void = () => {
   };
   onPageFinished: (tab: BrowserTab) => void = () => {
   };
+  /** 网页全屏状态变化（进入=true/退出=false）：宿主据此隐藏地址栏/底栏让视频铺满窗口 */
   /** 网页请求的新窗口（target=_blank，如知乎推文/B站视频卡）：交给宿主开新标签；第二参继承无痕标志 */
   onNewWindow: (url: string, incognito: boolean) => void = () => {
+  };
+  /** 网页全屏状态变化：进入全屏=true，退出=false（宿主隐藏/恢复工具栏） */
+  onFullscreenChange: (inFull: boolean) => void = () => {
   };
 
   private controller: webview.WebviewController = new webview.WebviewController();
@@ -381,8 +404,8 @@ export struct WebPane {
         this.syncLoading();
       })
       // 网页全屏请求手势门槛化：用户点视频全屏按钮必伴随触摸（1 秒内）
-      // → 放行；页面自动请求的横幅全屏（无手势）会把 Web 撑满整窗盖住
-      // Aia 工具栏且系统返回退不出（实测知乎视频横幅）→ 立即拒绝
+      // → 放行；页面自动请求的横幅全屏（无手势）会盖住 Aia 工具栏且
+      // 系统返回退不出（实测知乎视频横幅）→ 拒绝
       .onFullScreenEnter((event: FullScreenEnterEvent) => {
         if (!shouldAllowFullscreen(this.lastTouchAt, Date.now())) {
           console.info('AiaWeb fullscreenEnter -> reject (no user gesture)');
@@ -393,9 +416,30 @@ export struct WebPane {
           }
           return;
         }
-        console.info('AiaWeb fullscreenEnter -> allow (user gesture)');
+        // 内核全屏层实测（API 26）无法程序化干预，全部验证过的手段：
+        // ① 层尺寸在 enter 时刻按当前窗口方向冻结——竖屏进入后旋转窗口，
+        //    层内视频永远小窗（层 UI 会随横屏重排，唯独视频不重排）；
+        // ② exitFullScreen 拆不掉层（立即/延迟/先泵 JS 再调都无效，无事件回调）；
+        // ③ 页面 DOM/CSS 对层完全不可见（注入红色全屏层屏幕无变化）；
+        // ④ Web 组件可见性瞬断逼重 composition 也无效；
+        // ⑤ JS requestFullscreen 重进拿不到第二次 enter（注入无用户激活）。
+        // 用户手势点层内原生退出按钮是唯一可靠出口（触发 onFullScreenExit）。
+        // 故只做顺势适配：横屏视频全屏时把窗口转向横屏（方向正确+沉浸黑底），
+        // 层内视频冻结小窗的布局问题留待内核版本修复
+        const vw: number = event.videoWidth ?? 0;
+        const vh: number = event.videoHeight ?? 0;
+        if (vw >= vh) {
+          this.setWindowOrientation(window.Orientation.LANDSCAPE);
+        }
+        this.onFullscreenChange(true);
+        console.info('AiaWeb fullscreenEnter -> allow landscape=' + (vw >= vh) + ' video=' + vw + 'x' + vh);
       })
       .onFullScreenExit(() => {
+        // 全屏退出（用户点层内原生退出按钮等手势路径，程序化退层到不了这里）：
+        // 恢复窗口方向跟随系统 + 通知宿主恢复工具栏。
+        // UNSPECIFIED 不强制竖屏：若用户开着自动旋转并手持横屏，依旧横屏
+        this.setWindowOrientation(window.Orientation.UNSPECIFIED);
+        this.onFullscreenChange(false);
         console.info('AiaWeb fullscreenExit');
       })
       .visibility(this.active ? Visibility.Visible : Visibility.None);
