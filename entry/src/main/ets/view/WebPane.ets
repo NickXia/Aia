@@ -248,7 +248,8 @@ export struct WebPane {
         this.tab.loadError = false;
         this.tab.loadFailed = false;
         this.tab.userStopped = false; // 新导航（含页内点击）恢复进度监听
-        console.info('AiaWeb pageBegin ' + current);
+        // 日志剥离 query（审查 #10）：query 里可能带 token/session，不落 hilog
+        console.info('AiaWeb pageBegin ' + current.split('?')[0]);
         this.tab.url = current;
         this.tab.isLoading = true;
         this.tab.progress = 0;
@@ -348,7 +349,7 @@ export struct WebPane {
         try {
           const code: number = event.response.getResponseCode();
           const main: boolean = event.request.isMainFrame();
-          console.info('AiaWeb httpErr url=' + event.request.getRequestUrl()
+          console.info('AiaWeb httpErr url=' + event.request.getRequestUrl().split('?')[0]
             + ' code=' + code + ' main=' + main);
           if (isMainDocHttpError(code, main)) {
             this.tab.loadError = true;
