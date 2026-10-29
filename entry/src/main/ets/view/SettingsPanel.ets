@@ -5,7 +5,7 @@ import { C } from '../common/AiaTheme';
 
 /** ICP/App 备案号：工信部 App 备案通过后必填展示（AGC 上架也要在「应用备案信息」里填同一号码）。
  *  留空则本页不显示该行，上线前必须填真实备案号 */
-const ICP_NUMBER: string = '';
+const ICP_NUMBER: string = '赣ICP备2026028117号';
 /** 公安联网备案号：备案通过 30 天内在 beian.mps.gov.cn 完成后填入，形如「粤公安网备XXXXXXXXXXXXX号」 */
 const POLICE_NUMBER: string = '';
 
