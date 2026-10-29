@@ -3,6 +3,12 @@ import { fileUri } from '@kit.CoreFileKit';
 import { ZFont, ZRadius, ZSpace, getUiScale } from '../common/AiaTheme';
 import { C } from '../common/AiaTheme';
 
+/** ICP/App 备案号：工信部 App 备案通过后必填展示（AGC 上架也要在「应用备案信息」里填同一号码）。
+ *  留空则本页不显示该行，上线前必须填真实备案号 */
+const ICP_NUMBER: string = '';
+/** 公安联网备案号：备案通过 30 天内在 beian.mps.gov.cn 完成后填入，形如「粤公安网备XXXXXXXXXXXXX号」 */
+const POLICE_NUMBER: string = '';
+
 /**
  * 设置面板。只放真正会改行为的开关，不堆砌选项。
  */
@@ -479,6 +485,42 @@ export struct SettingsPanel {
             .padding({ left: 14, right: 14 })
             .borderRadius(ZRadius.card)
             .backgroundColor(C('surface_alt'))
+
+            // 备案号展示（ICP/公安备案通过后由顶部常量控制显示）
+            if (ICP_NUMBER.length > 0) {
+              Row() {
+                Text('ICP/App 备案')
+                  .fontSize(ZFont.body)
+                  .fontColor(C('text_primary'))
+                  .layoutWeight(1)
+                  .textAlign(TextAlign.Start)
+                Text(ICP_NUMBER)
+                  .fontSize(ZFont.footnote)
+                  .fontColor(C('text_tertiary'))
+              }
+              .width('100%')
+              .height(46)
+              .padding({ left: 14, right: 14 })
+              .borderRadius(ZRadius.card)
+              .backgroundColor(C('surface_alt'))
+            }
+            if (POLICE_NUMBER.length > 0) {
+              Row() {
+                Text('公安联网备案')
+                  .fontSize(ZFont.body)
+                  .fontColor(C('text_primary'))
+                  .layoutWeight(1)
+                  .textAlign(TextAlign.Start)
+                Text(POLICE_NUMBER)
+                  .fontSize(ZFont.footnote)
+                  .fontColor(C('text_tertiary'))
+              }
+              .width('100%')
+              .height(46)
+              .padding({ left: 14, right: 14 })
+              .borderRadius(ZRadius.card)
+              .backgroundColor(C('surface_alt'))
+            }
 
             Text('基于 HarmonyOS ArkWeb 内核')
               .fontSize(Math.round(10 * getUiScale()))
