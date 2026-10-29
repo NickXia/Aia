@@ -2,6 +2,7 @@ import { AbilityConstant, UIAbility, Want, ConfigurationConstant, Configuration 
 import { hilog } from '@kit.PerformanceAnalysisKit';
 import { window } from '@kit.ArkUI';
 import { BusinessError } from '@kit.BasicServicesKit';
+import { audio } from '@kit.AudioKit';
 import { AiaStore } from '../common/Storage';
 import { webview } from '@kit.ArkWeb';
 
@@ -9,6 +10,51 @@ const TAG: string = 'Aia';
 const DOMAIN: number = 0x0001;
 
 export default class EntryAbility extends UIAbility {
+  /**
+   * 声明音频并发策略为 share（MIX_WITH_OTHERS）。
+   * 上架自检「音频规范」要求：短音/瞬态音、静音播放场景不得打断后台音频。
+   * 应用未自管音频焦点（音频来自 ArkWeb 网页内容），故在应用级激活 AudioSession，
+   * 使应用内所有音频流（含 Web 内核流）与其他应用音频并发播放。
+   */
+  private activateAudioShare(): void {
+    try {
+      const sessionMgr: audio.AudioSessionManager =
+        audio.getAudioManager().getSessionManager();
+      if (sessionMgr.isAudioSessionActivated()) {
+        return;
+      }
+      // 浏览器属于媒体场景；激活后系统按 share 策略申请焦点
+      sessionMgr.setAudioSessionScene(audio.AudioSessionScene.AUDIO_SESSION_SCENE_MEDIA);
+      const strategy: audio.AudioSessionStrategy = {
+        concurrencyMode: audio.AudioConcurrencyMode.CONCURRENCY_MIX_WITH_OTHERS
+      };
+      sessionMgr.activateAudioSession(strategy).then(() => {
+        hilog.info(DOMAIN, TAG, 'audio session activated (share)');
+      }).catch((err: BusinessError) => {
+        hilog.error(DOMAIN, TAG, 'activateAudioSession failed: %{public}s', JSON.stringify(err));
+      });
+    } catch (err) {
+      hilog.error(DOMAIN, TAG, 'audio session setup failed');
+    }
+  }
+
+  private watchAudioSession(): void {
+    try {
+      const sessionMgr: audio.AudioSessionManager =
+        audio.getAudioManager().getSessionManager();
+      // 无音频流运行时会话会被系统超时停用，回到前台/超时后重新激活
+      sessionMgr.on('audioSessionDeactivated',
+        (e: audio.AudioSessionDeactivatedEvent) => {
+          hilog.info(DOMAIN, TAG, 'audio session deactivated: %{public}d', e.reason);
+          if (e.reason === audio.AudioSessionDeactivatedReason.DEACTIVATED_TIMEOUT) {
+            this.activateAudioShare();
+          }
+        });
+    } catch (err) {
+      hilog.error(DOMAIN, TAG, 'audio session watch failed');
+    }
+  }
+
   onCreate(want: Want, launchParam: AbilityConstant.LaunchParam): void {
     AiaStore.init(this.context);
     const incoming: string = want.uri === undefined ? '' : want.uri;
@@ -36,6 +82,13 @@ export default class EntryAbility extends UIAbility {
     }
     AppStorage.setOrCreate<number>('themeEpoch', 0);
     hilog.info(DOMAIN, TAG, 'Aia started');
+    this.watchAudioSession();
+    this.activateAudioShare();
+  }
+
+  onForeground(): void {
+    // 会话可能已被超时停用，回前台时补激活
+    this.activateAudioShare();
   }
 
   onConfigurationUpdate(newConfig: Configuration): void {
